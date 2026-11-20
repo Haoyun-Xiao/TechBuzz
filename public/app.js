@@ -88,6 +88,10 @@ function byNewest(items, field = "updatedAt") {
   return [...items].sort((a, b) => (time(b[field] || b.date) || 0) - (time(a[field] || a.date) || 0));
 }
 
+function reportDay(item) {
+  return item?.date || day(item?.asOf || item?.updatedAt);
+}
+
 function routeLink(page, id = "", query = {}) {
   const params = new URLSearchParams(Object.entries(query).filter(([, value]) => value));
   return `#${page}${id ? `/${encodeURIComponent(id)}` : ""}${params.size ? `?${params}` : ""}`;
@@ -176,7 +180,7 @@ async function loadData(manual = false) {
   try {
     try {
       payload = validate(await readJSON("./api/dashboard", { signal: AbortSignal.timeout(9000) }));
-      live = true;
+      live = payload.mode !== "snapshot";
     } catch {
       payload = validate(await readJSON("./snapshot.json", { signal: AbortSignal.timeout(9000) }));
       live = false;
@@ -293,14 +297,15 @@ function home() {
   const reports = byNewest(list(payload.reports), "date");
   const latest = reports[0];
   const today = day(payload.generatedAt);
+  const researchDay = reportDay(latest) || today;
   const recent = [
     ...list(payload.ideas).map(item => ({ type: "ideas", item })),
     ...list(payload.trends).map(item => ({ type: "trends", item })),
-  ].filter(({ item }) => today && day(item.updatedAt) === today)
+  ].filter(({ item }) => researchDay && day(item.asOf || item.updatedAt) === researchDay)
     .sort((a, b) => (time(b.item.updatedAt) || 0) - (time(a.item.updatedAt) || 0));
   const changes = list(latest?.sections).filter(section => section.kind === "digests");
   const hot = list(payload.hot);
-  return `${heading("科技股研究总览", "围绕关注账号的新信息，追踪投资假设和产业变化。", `<span class="page-date">数据截至 ${stamp(payload.generatedAt, "待更新")}</span>`)}
+  return `${heading("科技股研究总览", "围绕关注账号的新信息，追踪投资假设和产业变化。", `<span class="page-date">看板生成于 ${stamp(payload.generatedAt, "待更新")}</span>`)}
     <div class="home-grid">
       <div class="home-main">
         <section class="lead" aria-labelledby="lead-title">
@@ -316,10 +321,10 @@ function home() {
           <div class="panel">${changes.slice(0, 3).map(item => `<article class="list-row"><h3>${esc(item.title)}</h3><p>${esc(item.summary)}</p>${evidenceLinks(item.evidence)}</article>`).join("")}</div>
         </section>` : ""}
         <section>
-          ${sectionHeading("今日研究变化")}
+          ${sectionHeading(researchDay === today ? "今日研究变化" : "最新研究日变化", researchDay && researchDay !== today ? `<span class="meta">${esc(researchDay)}</span>` : "")}
           ${recent.length
-            ? `<div class="panel">${recent.slice(0, 6).map(({ type, item }) => itemRow(type, item, true, item.firstSeen === today ? "今日新增" : "今日修订")).join("")}</div>`
-            : empty("截至本次更新，今日暂无新增或修订的 Idea 和趋势。")}
+            ? `<div class="panel">${recent.slice(0, 6).map(({ type, item }) => itemRow(type, item, true, item.firstSeen === researchDay ? "新增" : "修订")).join("")}</div>`
+            : empty("该研究日暂无新增或修订的 Idea 和趋势。")}
         </section>
         <section>
           ${sectionHeading("24 小时热点", internal("完整热点", "hot"))}
@@ -379,7 +384,7 @@ function scoringDetails(rating) {
   return scores.length ? `<div class="meta">${scores.map(([label, value, max]) => `<span>${label} ${value}/${max}</span>`).join("")}</div>` : "";
 }
 
-function postCard(post, { detail = false, evidence = false } = {}) {
+function postCard(post, { detail = false, evidence = false, grouped = false } = {}) {
   if (post.unavailable) return `<article class="post"><p class="muted">证据 ${esc(post.id)} 未收录于本次数据。</p></article>`;
   const rating = score(post);
   const summary = rating.summary || post.summary;
@@ -403,7 +408,7 @@ function postCard(post, { detail = false, evidence = false } = {}) {
     ${contextBlock(post, "replyTo", "回复上文")}
     ${contextBlock(post, "repostOf", "被转发内容")}
     ${post.article?.url ? urlLink(post.article.url, "查看原文附带文章", "inline-link") : ""}
-    ${threadLinks(post)}
+    ${grouped ? "" : threadLinks(post)}
     ${detail ? mediaLinks(post) : ""}
     <div class="post-actions">
       ${detail ? "" : internal("查看摘录", "post", post.id, {}, "button")}
@@ -411,6 +416,26 @@ function postCard(post, { detail = false, evidence = false } = {}) {
       ${saveButton("post", post.id)}
     </div>
   </article>`;
+}
+
+function postGroups(items) {
+  const groups = new Map();
+  for (const post of items) {
+    const root = String(post.threadRootId || post.id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(post);
+  }
+  return [...groups.entries()].map(([root, members]) => {
+    if (members.length === 1) return postCard(members[0]);
+    const lead = members.find(post => String(post.id) === root) || members[0];
+    const children = byNewest(members.filter(post => post !== lead), "publishedAt").reverse();
+    return `<div class="thread-group">
+      ${postCard(lead, { grouped: true })}
+      <details class="thread-expand"><summary>展开串帖其余 ${children.length} 条</summary>
+        ${children.map(post => postCard(post, { grouped: true })).join("")}
+      </details>
+    </div>`;
+  }).join("");
 }
 
 function distinct(values) {
@@ -478,7 +503,7 @@ function feed(page, query) {
   if (curated) matches.sort((a, b) => score(b).score - score(a).score);
   const selectedTopics = query.get("topic") || query.get("company");
   const results = `<p class="filter-count">${matches.length} 条帖子</p>${matches.length
-    ? `<div class="panel">${matches.map(post => postCard(post)).join("")}</div>`
+    ? `<div class="panel">${curated ? matches.map(post => postCard(post)).join("") : postGroups(matches)}</div>`
     : empty("没有符合当前条件的帖子。", query.size ? internal("清除筛选", page) : "")}`;
   const related = ["ideas", "trends"].map(type => ({
     type,
@@ -492,7 +517,7 @@ function feed(page, query) {
     </div>`;
   return `${heading(curated ? "精选帖子" : topicPage ? "行业与公司主题" : "X 信息流", curated
     ? `当前精选阈值为 ${threshold} 分。按研究相关性评分从高到低排列。`
-    : topicPage ? "按行业、主题或公司查阅原帖及相关研究。" : "来自关注账号的帖子，按发布时间排列。")}
+    : topicPage ? "按行业、主题或公司查阅原帖及相关研究。" : "来自关注账号的帖子，按发布时间排列，可展开同一串帖。")}
     ${filterForm(page, query, taxonomy)}
     ${topicPage ? topics : ""}
     ${topicPage && selectedTopics ? related.map(({ type, items }) => section(TYPES[type].title, items.length
@@ -522,10 +547,17 @@ function hotEvidence(ids) {
   const repeats = [];
   for (const post of getEvidence(ids)) {
     const key = post.evidenceKey || post.originId || post.id;
-    if (unique.has(key)) repeats.push(post.id);
-    else unique.set(key, post.id);
+    const prior = unique.get(key);
+    const isOriginal = (post.kind || post.type) === "original";
+    const priorIsOriginal = (prior?.kind || prior?.type) === "original";
+    if (!prior || (isOriginal && !priorIsOriginal)) {
+      if (prior) repeats.push(prior.id);
+      unique.set(key, post);
+    } else {
+      repeats.push(post.id);
+    }
   }
-  const primary = evidenceCards([...unique.values()]);
+  const primary = evidenceCards([...unique.values()].map(post => post.id));
   const references = repeats.length ? `<details class="panel panel-body repeated-evidence">
     <summary>同一上游出处的其他讨论（${repeats.length} 条）</summary>${evidenceLinks(repeats)}
   </details>` : "";
@@ -559,7 +591,7 @@ function relatedResearch(item) {
 function timeline(entries) {
   if (!entries.length) return "";
   return `<ol class="panel timeline">${entries.map(entry => `<li>
-    <div class="meta">${stamp(entry.generatedAt || entry.date || entry.updatedAt)}${entry.status === "archived" ? "<span>已归档</span>" : ""}</div>
+    <div class="meta">${stamp(entry.date || entry.asOf || entry.generatedAt || entry.updatedAt)}${entry.status === "archived" ? "<span>已归档</span>" : ""}${entry.model ? `<span>${esc(entry.model)}${entry.reasoningEffort ? ` / ${esc(entry.reasoningEffort)}` : ""}</span>` : ""}</div>
     <p>${esc(entry.summary)}</p>
     ${evidenceLinks(entry.evidence)}
     ${list(entry.counterEvidence).length ? `<p class="meta">反证</p>${evidenceLinks(entry.counterEvidence)}` : ""}
@@ -584,6 +616,7 @@ function detail(type, id) {
         <span>${stamp(item.date || item.updatedAt)}</span>
         ${item.firstSeen ? `<span>首次记录 ${stamp(item.firstSeen)}</span>` : ""}
         ${item.windowStart && item.windowEnd ? `<span>观察窗口 ${stamp(item.windowStart)} 至 ${stamp(item.windowEnd)}</span>` : ""}
+        ${item.asOf ? `<span>证据截至 ${stamp(item.asOf)}</span>` : ""}
         ${item.status === "archived" ? "<span>已归档</span>" : ""}
         ${pageSuffix}
       </div>
@@ -591,6 +624,7 @@ function detail(type, id) {
       ${tagList(item.topics, "topic")}
       ${tagList(item.companies, "company")}
       <div class="actions">${saveButton(type, item.id)}${["trends", "ideas", "reports"].includes(type) ? internal("交给 Agent", "agent", "", { type, item: item.id }, "button") : ""}</div>
+      ${item.model || item.generatedAt ? `<details class="score-note"><summary>生成信息</summary><div class="meta">${item.generatedAt ? `<span>生成于 ${stamp(item.generatedAt)}</span>` : ""}${item.model ? `<span>${esc(item.model)}</span>` : ""}${item.reasoningEffort ? `<span>推理强度 ${esc(item.reasoningEffort)}</span>` : ""}</div></details>` : ""}
     </header>
     ${section("研究要点", facts)}
     ${sections.map(entry => section(entry.title || "研究摘要", `<article class="panel panel-body"><p>${esc(entry.summary)}</p>${evidenceLinks(entry.evidence)}</article>`)).join("")}
@@ -637,6 +671,7 @@ function agentPacket(type, item) {
   const entries = item ? [item] : byNewest(list(payload[type])).slice(0, 10);
   for (const entry of entries) {
     report.push("", "## " + entry.title, entry.summary || "");
+    if (entry.asOf) report.push("证据截至 " + entry.asOf);
     if (entry.watchNext) report.push("待核对 " + [].concat(entry.watchNext).join("；"));
     const url = new URL(routeLink(type, entry.id), location.href);
     report.push("看板详情 " + url);

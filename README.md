@@ -4,7 +4,7 @@
 
 ## 阅读演示
 
-打开仓库 About 中的演示主页。首页呈现最新研究与日报；从 **Idea** 查看相关公司、作者观点、模型推断及证伪条件，从 **趋势** 按日期回看判断，再从证据链接到原帖。信息流支持账号和主题筛选。收藏保存在当前设备的浏览器。
+[打开 TechBuzz 演示](https://haoyun-xiao.github.io/TechBuzz/)。首页呈现最新研究与日报；从 **Idea** 查看相关公司、作者观点、模型推断及证伪条件，从 **趋势** 按日期回看判断，再从证据链接到原帖。信息流支持账号和主题筛选。收藏保存在当前设备的浏览器。
 
 GitHub Pages 使用从本地数据库导出的静态快照。页面标示导出时间，公开帖子只提供短摘和来源链接。快照中的评分、Idea、趋势和日报由同一研究引擎运行生成。演示用的原链样本标记为样本，不用于证明整段时间内的采集完整性。
 
@@ -45,6 +45,7 @@ docker compose up --build -d
 ```sh
 docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite worker node bootstrap.mjs
 docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite worker node replay.mjs
+mkdir -p .runtime/site
 docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite -v "$PWD/.runtime/site:/output" worker node export.mjs /output
 docker compose run --rm worker npm test
 ```

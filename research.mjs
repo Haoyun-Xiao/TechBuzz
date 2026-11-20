@@ -10,7 +10,7 @@ const SCORING_VERSION = 2;
 const SCORE_MAX = { impact: 35, novelty: 25, verification: 25, followUp: 15 };
 const IDEA_VERSION = 1;
 const TREND_VERSION = 2;
-const REPORT_VERSION = 1;
+const REPORT_VERSION = 2;
 const running = new Map();
 
 const instructions = {
@@ -88,7 +88,7 @@ function source(post, now) {
     thread: thread.slice(0, 20).map((part) => ({
       ...sourcePart(part, now, 4_000), quoted: sourcePart(part.quoted, now, 2_000), replyTo: sourcePart(part.replyTo, now, 2_000),
     })),
-    threadTruncated: thread.length > 20,
+    ...(thread.length > 20 ? { threadTruncated: true } : {}),
   };
 }
 
@@ -162,6 +162,11 @@ export function initResearch(db) {
       outcome TEXT NOT NULL,
       called_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS research_idea_receipts (
+      id INTEGER PRIMARY KEY,
+      input_hash TEXT NOT NULL UNIQUE,
+      value TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS research_session (id INTEGER PRIMARY KEY CHECK (id = 1), session TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS research_jobs (
       kind TEXT NOT NULL,
@@ -220,6 +225,7 @@ export function research(db) {
     reports: readEntries(db, 'reports').sort((a, b) => b.date.localeCompare(a.date)),
     jobs: db.prepare('SELECT kind, scope, status, attempts, error, updated_at AS updatedAt FROM research_jobs ORDER BY kind, scope DESC').all(),
     modelCalls: db.prepare('SELECT kind, model, reasoning_effort AS reasoningEffort, outcome, called_at AS calledAt FROM research_model_calls ORDER BY id DESC LIMIT 25').all(),
+    ideaReceipts: db.prepare('SELECT value FROM research_idea_receipts ORDER BY id DESC LIMIT 25').all().map(({ value }) => JSON.parse(value)),
   };
 }
 
@@ -227,13 +233,16 @@ function modelClient(db, options) {
   const model = options.model ?? (options.complete ? 'injected' : process.env.TECHBUZZ_LLM_MODEL ?? '');
   const reasoningEffort = process.env.TECHBUZZ_LLM_REASONING_EFFORT || 'max';
   const signature = [model, reasoningEffort];
-  if (options.complete) return { signature, complete: options.complete };
+  let actualModel = model;
+  const provenance = (asOf) => ({ asOf: iso(asOf), generatedAt: new Date().toISOString(), model: actualModel, reasoningEffort });
+  if (options.complete) return { signature, provenance, complete: options.complete };
   const base = process.env.TECHBUZZ_LLM_BASE_URL;
   const key = process.env.TECHBUZZ_LLM_API_KEY;
   const session = db.prepare('SELECT session FROM research_session WHERE id = 1').get().session;
   const saveCall = db.prepare('INSERT INTO research_model_calls (kind, model, reasoning_effort, outcome, called_at) VALUES (?, ?, ?, ?, ?)');
   return {
     signature,
+    provenance,
     aliasSources: true,
     complete: async ({ kind, system, input }) => {
       if (!base || !key || !model) throw new Error('请配置 TECHBUZZ_LLM_BASE_URL、TECHBUZZ_LLM_API_KEY 和 TECHBUZZ_LLM_MODEL');
@@ -242,7 +251,7 @@ function modelClient(db, options) {
       if (endpoint.hostname === 'opencode.ai') headers['x-opencode-session'] = `ses_${session}-${kind.startsWith('trend') ? 'trends' : kind}`;
       for (const maxTokens of [8_192, 16_384]) {
         const calledAt = new Date().toISOString();
-        let actualModel = model;
+        actualModel = model;
         let outcome = 'failed';
         try {
           const response = await fetch(endpoint, {
@@ -252,7 +261,7 @@ function modelClient(db, options) {
               reasoning_effort: reasoningEffort, max_tokens: maxTokens,
               messages: [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(input) }],
             }),
-            signal: AbortSignal.timeout(120_000),
+            signal: AbortSignal.timeout(360_000),
           });
           if (!response.ok) throw new Error(`模型 HTTP ${response.status}`);
           const data = await response.json();
@@ -381,8 +390,17 @@ async function scorePosts(db, client, posts, now) {
   };
 }
 
-function knownEntries(db) {
-  return [...readEntries(db, 'ideas'), ...readEntries(db, 'trends')].map(({ id, title, status }) => ({ id, title, status }));
+function knownEntries(db, detailTrends = false) {
+  const reference = ({ id, title, status }) => ({ id, title, status });
+  const ideas = readEntries(db, 'ideas').map(reference);
+  const trends = readEntries(db, 'trends').map((entry) => detailTrends ? {
+    ...reference(entry), stage: entry.stage, summary: clean(entry.summary, 500),
+    windowStart: entry.windowStart, windowEnd: entry.windowEnd,
+    timeline: (entry.timeline ?? []).slice(-6).map(({ date, summary, evidence, counterEvidence }) => ({
+      date, summary: clean(summary, 140), supportCount: evidence.length, counterCount: counterEvidence.length,
+    })),
+  } : reference(entry));
+  return [...ideas, ...trends];
 }
 
 function entryUpdate(raw, prior, evidence, counterEvidence, relatedAllowed, now, fields) {
@@ -390,13 +408,14 @@ function entryUpdate(raw, prior, evidence, counterEvidence, relatedAllowed, now,
   const summary = clean(raw.summary, 1_600);
   if (!title || !summary) throw new Error('研究条目缺少标题或结论');
   const date = beijingDate(now);
+  const { provenance, ...researchFields } = fields;
   const contents = {
     title, summary, evidence, counterEvidence,
     topics: labels(raw.topics), companies: labels(raw.companies),
     relatedIds: labels(raw.relatedIds).filter((id) => relatedAllowed.has(id) && id !== prior?.id),
     status: raw.status === 'archived' ? 'archived' : 'active',
     watchNext: clean(raw.watchNext, 500),
-    ...fields,
+    ...researchFields,
   };
   if (prior && Object.keys(contents).every((key) => JSON.stringify(contents[key]) === JSON.stringify(prior[key]))) return prior;
   return {
@@ -404,18 +423,21 @@ function entryUpdate(raw, prior, evidence, counterEvidence, relatedAllowed, now,
     ...contents,
     firstSeen: prior?.firstSeen ?? date,
     updatedAt: iso(now),
-    history: [...(prior?.history ?? []), { date, ...contents }],
+    ...provenance,
+    history: [...(prior?.history ?? []), { date, ...contents, ...provenance }],
   };
 }
 
 function archiveEntry(entry, now, summary) {
+  const provenance = { asOf: iso(now), generatedAt: new Date().toISOString(), model: null, reasoningEffort: null };
   return {
     ...entry,
+    ...provenance,
     status: 'archived',
     updatedAt: iso(now),
     history: [...entry.history, {
       date: beijingDate(now), title: entry.title, summary,
-      evidence: entry.evidence, counterEvidence: entry.counterEvidence, status: 'archived',
+      evidence: entry.evidence, counterEvidence: entry.counterEvidence, status: 'archived', ...provenance,
     }],
   };
 }
@@ -425,11 +447,12 @@ function updateIdeaEvidence(entry, allowed, now) {
   const counterEvidence = entry.counterEvidence.filter((id) => allowed.has(id));
   if (!evidence.length) return archiveEntry(entry, now, '当前阈值下没有可继续支持本条 Idea 的帖子');
   if (evidence.length === entry.evidence.length && counterEvidence.length === entry.counterEvidence.length) return entry;
+  const provenance = { asOf: iso(now), generatedAt: new Date().toISOString(), model: null, reasoningEffort: null };
   return {
-    ...entry, evidence, counterEvidence, updatedAt: iso(now),
+    ...entry, evidence, counterEvidence, updatedAt: iso(now), ...provenance,
     history: [...entry.history, {
       date: beijingDate(now), title: entry.title, summary: '按当前评分阈值更新证据',
-      evidence, counterEvidence, status: entry.status,
+      evidence, counterEvidence, status: entry.status, ...provenance,
     }],
   };
 }
@@ -443,15 +466,24 @@ async function makeIdeas(db, client, posts, now, { threshold, thresholdVersion }
     const pending = high.filter(({ material }) => priorInputs.get(material.id) !== fingerprints.get(material.id));
     const write = db.prepare(`INSERT INTO research_idea_inputs VALUES (?, ?)
       ON CONFLICT(post_id) DO UPDATE SET input_hash = excluded.input_hash`);
+    const writeReceipt = db.prepare('INSERT OR REPLACE INTO research_idea_receipts (input_hash, value) VALUES (?, ?)');
     for (const group of batches(pending)) {
       const known = knownEntries(db);
       const existing = readEntries(db, 'ideas');
       const allowed = new Set(group.map(({ material }) => material.id));
       const relatedAllowed = new Set(known.map(({ id }) => id));
+      const receiptHash = hash(group.map(({ material }) => fingerprints.get(material.id)));
+      const receipt = {
+        threshold, thresholdVersion,
+        from: group[0].material.publishedAt, to: group.at(-1).material.publishedAt,
+        posts: group.map(({ material, assessment }) => ({ id: material.id, score: assessment.score })),
+      };
+      writeReceipt.run(receiptHash, JSON.stringify({ ...receipt, ...client.provenance(now), status: 'attempted' }));
       const result = await ask(client, 'ideas', {
         threshold, thresholdVersion, known,
         posts: group.map(({ material, assessment }) => ({ ...material, assessment })),
       });
+      const provenance = client.provenance(now);
       const updates = objectArray(result, 'entries').map((raw) => {
         const current = citations(raw.evidence, allowed, true);
         const counter = citations(raw.counterEvidence, allowed);
@@ -461,12 +493,13 @@ async function makeIdeas(db, client, posts, now, { threshold, thresholdVersion }
         return entryUpdate(raw, prior, evidence, counterEvidence, relatedAllowed, now, {
           thesis: clean(raw.thesis, 600), catalyst: clean(raw.catalyst, 600),
           facts: clean(raw.facts, 600), authorView: clean(raw.authorView, 600), inference: clean(raw.inference, 600),
-          risk: clean(raw.risk, 600), invalidation: clean(raw.invalidation, 600), thresholdVersion,
+          risk: clean(raw.risk, 600), invalidation: clean(raw.invalidation, 600), threshold, thresholdVersion, provenance,
         });
       });
       transaction(db, () => {
         for (const entry of updates) putEntry(db, 'ideas', entry);
         for (const { material } of group) write.run(material.id, fingerprints.get(material.id));
+        writeReceipt.run(receiptHash, JSON.stringify({ ...receipt, ...provenance, status: 'completed' }));
       });
     }
     return () => {
@@ -574,7 +607,7 @@ async function makeTrends(db, client, posts, now) {
       }
     }
     const existing = readEntries(db, 'trends');
-    const known = knownEntries(db);
+    const known = knownEntries(db, true);
     const relatedAllowed = new Set(known.map(({ id }) => id));
     const datedSources = recent.map(({ material, assessment }) => ({
       id: material.id, date: beijingDate(Date.parse(material.publishedAt)), handle: material.handle,
@@ -585,6 +618,7 @@ async function makeTrends(db, client, posts, now) {
     const reduced = await reduceTrends(client, analysis, datedSources, get, put);
     const input = { windowStart, windowEnd, ...reduced, known };
     const result = reduced.analysis.length ? await ask(client, 'trends', input) : { entries: [] };
+    const provenance = client.provenance(now);
     const updates = new Map();
     const allowedSynthesis = new Set(reduced.sources.map(({ id }) => id));
     for (const raw of objectArray(result, 'entries')) {
@@ -594,7 +628,7 @@ async function makeTrends(db, client, posts, now) {
       if (!evidence.length && !counterEvidence.length) throw new Error('趋势缺少当前窗口内可核验的引用');
       if (raw.status === 'archived' && !prior) continue;
       const next = entryUpdate(raw, prior, evidence, counterEvidence, relatedAllowed, now, {
-        windowStart, windowEnd, stage: clean(raw.stage, 100),
+        windowStart, windowEnd, stage: clean(raw.stage, 100), provenance,
         timeline: trendTimeline(raw, dateById, evidence, counterEvidence, notes, clean(raw.summary, 650)),
       });
       if (updates.has(next.id)) throw new Error('模型重复更新同一个趋势');
@@ -612,9 +646,10 @@ async function makeTrends(db, client, posts, now) {
   });
 }
 
-function reportEntries(db, kind, allowed) {
+function reportEntries(db, kind, allowed, date) {
   return readEntries(db, kind).map(({ id, history }) => {
-    const revision = history.findLast(({ evidence, counterEvidence }) => [...evidence, ...(counterEvidence ?? [])].some((postId) => allowed.has(postId)));
+    const revision = history.findLast((revision) => revision.date <= date
+      && [...revision.evidence, ...(revision.counterEvidence ?? [])].some((postId) => allowed.has(postId)));
     if (!revision) return null;
     return {
       id, title: revision.title, evidence: revision.evidence.filter((postId) => allowed.has(postId)),
@@ -630,16 +665,19 @@ async function makeReport(db, client, posts, now) {
   const daily = posts.filter(({ publishedMs }) => publishedMs >= todayStart - DAY && publishedMs < todayStart);
   if (daily.some(({ assessment }) => !assessment)) return;
   const allowed = new Set(daily.map(({ material }) => material.id));
-  const fingerprint = hash([REPORT_VERSION, client.signature, date, daily.map(({ scoreHash, assessment }) => [scoreHash, assessment])]);
+  const material = daily.map(({ material, assessment }) => {
+    const visible = source(material, todayStart - 1);
+    const contextChanged = visible.thread.length !== material.thread.length || Boolean(visible.replyTo) !== Boolean(material.replyTo)
+      || Boolean(visible.quoted) !== Boolean(material.quoted);
+    return { ...visible, assessment: contextChanged ? null : assessment };
+  });
+  const fingerprint = hash([REPORT_VERSION, client.signature, date, material]);
   await runJob(db, 'report', date, fingerprint, now, async () => {
     const input = {
       date,
-      posts: daily.map(({ material, assessment }) => ({
-        ...material, text: clean(material.text, 1_800), thread: undefined,
-        assessment,
-      })),
-      ideas: reportEntries(db, 'ideas', allowed),
-      trends: reportEntries(db, 'trends', allowed),
+      posts: material.map((post) => ({ ...post, text: clean(post.text, 1_800), thread: undefined })),
+      ideas: reportEntries(db, 'ideas', allowed, date),
+      trends: reportEntries(db, 'trends', allowed, date),
     };
     const result = daily.length
       ? await ask(client, 'report', input)
@@ -662,7 +700,7 @@ async function makeReport(db, client, posts, now) {
     const history = stored ? JSON.parse(stored.value).history : [];
     const snapshot = { title, summary, sections, evidence: [...new Set(sections.flatMap(({ evidence }) => evidence))], inputCount: daily.length };
     if (history.at(-1)?.inputHash === fingerprint) return;
-    const revision = { ...snapshot, date, status: 'published', generatedAt: iso(now), inputHash: fingerprint };
+    const revision = { ...snapshot, date, status: 'published', ...client.provenance(now), inputHash: fingerprint };
     return () => putEntry(db, 'reports', {
       id, ...revision, updatedAt: iso(now), history: [...history, revision],
     });

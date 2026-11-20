@@ -77,6 +77,11 @@ test('四项评分、独立的 Idea / 多趋势、上午八点日报和历史追
   assert.equal(result.trends.length, 2);
   assert.deepEqual(result.ideas[0].evidence, ['high', 'other']);
   assert.equal(result.ideas[0].inference, '需核实利用率和实际签单价');
+  assert.equal(result.ideas[0].asOf, '2026-11-18T23:59:59.000Z');
+  assert.equal(result.ideas[0].model, 'injected');
+  assert.equal(result.ideaReceipts[0].threshold, 70);
+  assert.equal(result.ideaReceipts[0].status, 'completed');
+  assert.deepEqual(result.ideaReceipts[0].posts, [{ id: 'high', score: 85 }, { id: 'other', score: 85 }]);
   const ideaInput = log.find(({ kind }) => kind === 'ideas').input;
   assert.deepEqual(ideaInput.posts.map(({ id }) => id), ['high', 'other']);
   assert.equal(ideaInput.posts[0].text, high.text);
@@ -93,6 +98,8 @@ test('四项评分、独立的 Idea / 多趋势、上午八点日报和历史追
   assert.equal(result.reports.length, 1);
   assert.equal(result.reports[0].date, '2026-11-18');
   assert.equal(result.reports[0].updatedAt, '2026-11-19T00:00:00.000Z');
+  assert.equal(result.reports[0].asOf, result.reports[0].updatedAt);
+  assert.notEqual(result.reports[0].generatedAt, result.reports[0].asOf);
   assert.deepEqual(result.reports[0].evidence, ['high', 'low', 'other']);
   let callCount = log.length;
   assert.deepEqual(await analyze(db, rows, { now: eight, complete }), result);
@@ -102,6 +109,11 @@ test('四项评分、独立的 Idea / 多趋势、上午八点日报和历史追
   assert.equal(result.reports[0].date, '2026-11-20');
   assert.deepEqual(result.reports[0].evidence, ['new']);
   assert.equal(result.trends.find(({ id }) => id === rental.id).history.at(-1).stage, '分歧');
+  const priorTrends = log.findLast(({ kind }) => kind === 'trends').input.known;
+  const priorRental = priorTrends.find(({ id }) => id === rental.id);
+  assert.equal(priorRental.status, 'active');
+  assert.equal(priorRental.stage, '初现');
+  assert.equal(priorRental.timeline[0].date, '2026-11-18');
   assert.ok(result.ideas[0].history.length > 1);
   const laterScore = log.findLast(({ kind }) => kind === 'score');
   assert.equal(laterScore.input.posts.find(({ id }) => id === 'high').thread[0].id, 'future-thread');

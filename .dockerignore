@@ -1,0 +1,8 @@
+.git
+.env
+.env.*
+.runtime
+PLAN.md
+node_modules
+*.sqlite*
+.github

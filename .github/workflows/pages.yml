@@ -1,0 +1,41 @@
+name: TechBuzz Pages
+on:
+  push:
+    branches: [main]
+    paths: ['public/**', 'demo/snapshot.json', '.github/workflows/pages.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: techbuzz-pages
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: pages
+        uses: actions/configure-pages@v5
+      - env:
+          SITE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          mkdir site
+          cp -R public/. site/
+          cp demo/snapshot.json site/
+          touch site/.nojekyll
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          page = Path("site/index.html")
+          page.write_text(page.read_text().replace('content="./share-card.png"', 'content="' + os.environ["SITE_URL"].rstrip("/") + '/share-card.png"'))
+          PY
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

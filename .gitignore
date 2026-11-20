@@ -1,0 +1,8 @@
+.env
+.env.*
+!.env.example
+.runtime/
+PLAN.md
+node_modules/
+.DS_Store
+*.sqlite*

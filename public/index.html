@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#132432">
+  <meta name="description" content="TechBuzz 科技股投研台。追踪 X 上的科技产业动态、投资 Idea 和趋势，逐条核对研究证据。">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="TechBuzz · 科技股投研台">
+  <meta property="og:description" content="追踪 X 上的科技产业动态、投资 Idea 和趋势，逐条回到原帖核对研究证据。">
+  <meta property="og:image" content="./share-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="TechBuzz 科技股投研台">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>TechBuzz · 科技股投研台</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳转到正文</a>
+  <header class="masthead">
+    <div class="frame masthead-inner">
+      <a class="brand" href="#home" aria-label="TechBuzz 首页">
+        <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7"/><path d="M5.5 17h5l3-7.5 4.3 13 3.4-8H27"/></svg>
+        <span>TechBuzz</span>
+        <span class="brand-caption">科技股投研台</span>
+      </a>
+      <div class="masthead-tools">
+        <span id="data-mode" class="data-mode"><i></i>加载中</span>
+        <button id="refresh" class="refresh" type="button" aria-label="重新读取数据" title="重新读取数据">↻</button>
+      </div>
+    </div>
+  </header>
+  <div class="nav-shell">
+    <div class="frame nav-inner">
+      <nav class="primary-nav" aria-label="研究导航">
+        <a href="#home" data-page="home">首页</a>
+        <a href="#feed" data-page="feed">信息流</a>
+        <a href="#picks" data-page="picks">精选</a>
+        <a href="#hot" data-page="hot">热点榜</a>
+        <a href="#reports" data-page="reports">研究日报</a>
+        <a href="#ideas" data-page="ideas">Idea</a>
+        <a href="#trends" data-page="trends">趋势</a>
+        <a href="#topics" data-page="topics">主题</a>
+      </nav>
+      <nav class="utility-nav" aria-label="工具导航">
+        <a href="#saved" data-page="saved">收藏<span id="saved-count"></span></a>
+        <a href="#agent" data-page="agent">Agent</a>
+        <a href="#admin" data-page="admin">后台</a>
+        <a href="#about" data-page="about">关于</a>
+      </nav>
+    </div>
+  </div>
+  <main id="main-content" class="frame main" tabindex="-1">
+    <div class="loading" role="status">正在加载研究数据…</div>
+  </main>
+  <footer class="page-footer">
+    <div class="frame footer-inner"><span>TechBuzz <span class="footer-divider">/</span> 科技股投研台</span><span>时间统一采用北京时间</span></div>
+  </footer>
+  <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+  <noscript><p class="frame">请启用 JavaScript，以读取研究快照和切换页面。</p></noscript>
+</body>
+</html>

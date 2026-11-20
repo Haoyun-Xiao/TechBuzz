@@ -1,0 +1,33 @@
+name: techbuzz
+x-app: &app
+  image: techbuzz:local
+  build: .
+  init: true
+  restart: unless-stopped
+  volumes:
+    - research-data:/data
+services:
+  web:
+    <<: *app
+    environment:
+      TECHBUZZ_ADMIN_TOKEN: ${TECHBUZZ_ADMIN_TOKEN:-}
+    ports:
+      - "127.0.0.1:${TECHBUZZ_PORT:-19282}:3000"
+    healthcheck:
+      test: ["CMD","node","-e","fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+  worker:
+    <<: *app
+    command: ["node","worker.mjs"]
+    environment:
+      TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
+      TECHBUZZ_LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:-}
+      TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
+      TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
+      TECHBUZZ_SOCIALDATA_API_KEY: ${TECHBUZZ_SOCIALDATA_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+volumes:
+  research-data:

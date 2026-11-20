@@ -88,10 +88,6 @@ function byNewest(items, field = "updatedAt") {
   return [...items].sort((a, b) => (time(b[field] || b.date) || 0) - (time(a[field] || a.date) || 0));
 }
 
-function reportDay(item) {
-  return item?.date || day(item?.asOf || item?.updatedAt);
-}
-
 function routeLink(page, id = "", query = {}) {
   const params = new URLSearchParams(Object.entries(query).filter(([, value]) => value));
   return `#${page}${id ? `/${encodeURIComponent(id)}` : ""}${params.size ? `?${params}` : ""}`;
@@ -223,7 +219,7 @@ function itemRow(type, item, withKind = false, change = "") {
   return `<article class="list-row">
     <header class="list-row-title"><h3>${withKind ? `<span class="item-kind">${TYPES[type].item}</span>` : ""}${internal(itemTitle, type, item.id, {}, "")}</h3></header>
     ${summary ? `<p class="clip">${esc(summary)}</p>` : ""}
-    <div class="meta"><span>${stamp(item.date || item.updatedAt)}</span><span>${list(item.evidence).length} 条证据</span>${change ? `<span class="source-ok">${esc(change)}</span>` : ""}${item.status === "archived" ? "<span>已归档</span>" : ""}</div>
+    <div class="meta"><span>${stamp(item.date || item.asOf || item.updatedAt)}</span><span>${list(item.evidence).length} 条证据</span>${change ? `<span class="source-ok">${esc(change)}</span>` : ""}${item.status === "archived" ? "<span>已归档</span>" : ""}</div>
   </article>`;
 }
 
@@ -297,11 +293,14 @@ function home() {
   const reports = byNewest(list(payload.reports), "date");
   const latest = reports[0];
   const today = day(payload.generatedAt);
-  const researchDay = reportDay(latest) || today;
-  const recent = [
+  const latestReportDay = latest?.date || day(latest?.asOf || latest?.updatedAt);
+  const research = [
     ...list(payload.ideas).map(item => ({ type: "ideas", item })),
     ...list(payload.trends).map(item => ({ type: "trends", item })),
-  ].filter(({ item }) => researchDay && day(item.asOf || item.updatedAt) === researchDay)
+  ];
+  const revisionDay = item => day(item.asOf || item.updatedAt);
+  const researchDay = research.some(({ item }) => revisionDay(item) === today) ? today : latestReportDay || today;
+  const recent = research.filter(({ item }) => researchDay && revisionDay(item) === researchDay)
     .sort((a, b) => (time(b.item.updatedAt) || 0) - (time(a.item.updatedAt) || 0));
   const changes = list(latest?.sections).filter(section => section.kind === "digests");
   const hot = list(payload.hot);
@@ -564,8 +563,8 @@ function hotEvidence(ids) {
   return primary + references;
 }
 
-function topicFacts(item) {
-  const fields = [
+function researchFields(item) {
+  return [
     ["投资假设", item.thesis],
     ["已知事实", item.facts],
     ["作者观点", item.authorView],
@@ -575,9 +574,14 @@ function topicFacts(item) {
     ["风险", item.risk],
     ["失效条件", item.invalidation],
     ["下一步核对", item.watchNext],
-  ].filter(([, value]) => Array.isArray(value) ? value.length : typeof value === "string" && value.trim());
+  ].filter(([, value]) => Array.isArray(value) ? value.length : typeof value === "string" && value.trim())
+    .map(([label, value]) => [label, Array.isArray(value) ? value.join("、") : value]);
+}
+
+function topicFacts(item) {
+  const fields = researchFields(item);
   return fields.length ? `<dl class="panel fact-list">${fields.map(([label, value]) =>
-    `<div><dt>${label}</dt><dd>${esc(Array.isArray(value) ? value.join("；") : value)}</dd></div>`
+    `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`
   ).join("")}</dl>` : "";
 }
 
@@ -672,9 +676,10 @@ function agentPacket(type, item) {
   for (const entry of entries) {
     report.push("", "## " + entry.title, entry.summary || "");
     if (entry.asOf) report.push("证据截至 " + entry.asOf);
-    if (entry.watchNext) report.push("待核对 " + [].concat(entry.watchNext).join("；"));
     const url = new URL(routeLink(type, entry.id), location.href);
     report.push("看板详情 " + url);
+    for (const [label, value] of researchFields(entry)) report.push(`- **${label}** ${value}`);
+    for (const entrySection of list(entry.sections)) report.push("", "### " + entrySection.title, entrySection.summary);
     for (const group of [
       ["支持证据", entry.evidence],
       ["反证", entry.counterEvidence],

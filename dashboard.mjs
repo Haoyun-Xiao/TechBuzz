@@ -7,7 +7,7 @@ export function rankEvents(rows, scores, now) {
   const dayAgo = now.valueOf() - 86400000;
   for (const post of rows) {
     const published = Date.parse(post.publishedAt);
-    if (published < dayAgo || published > now.valueOf()) continue;
+    if (!Number.isFinite(published) || published < dayAgo || published > now.valueOf()) continue;
     const event = scores[post.id]?.event?.trim();
     if (!event) continue;
     const key = event.normalize('NFKC').toLowerCase();
@@ -15,7 +15,7 @@ export function rankEvents(rows, scores, now) {
     const group = groups.get(key);
     group.authors.add(post.handle);
     const origin = post.evidenceKey || post.originId || post.id;
-    if (!group.origins.has(origin)) group.origins.set(origin, post.quoted?.handle || post.handle);
+    if (!group.origins.has(origin)) group.origins.set(origin, (post.repostOf?.handle || post.quoted?.handle || post.handle).toLowerCase());
     group.evidence.push(post.id);
     if (published > Date.parse(group.updatedAt)) group.updatedAt = post.publishedAt;
   }

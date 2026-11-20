@@ -40,7 +40,7 @@ docker compose up --build -d
 
 ## 重现演示与验证
 
-下列命令在**单独的演示数据库**导入示例原链，并依照帖子发布时间回放研究。回放与实时 worker 可使用不同数据库。首次运行回放需要真实模型密钥，会消耗模型额度。
+下列命令在**单独的演示数据库**导入示例原链，并依照帖子发布时间回放研究。回放与实时 worker 可使用不同数据库。首次运行回放需要真实模型密钥，会消耗模型额度。回放按北京时间顺序保存已完成日期，模型服务暂时失败时重跑相同命令即可从断点继续。
 
 ```sh
 docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite worker node bootstrap.mjs

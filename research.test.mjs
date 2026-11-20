@@ -261,7 +261,8 @@ test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久�
     } else if (kind === 'trends' && input.posts) {
       result = { signals: [{ title: 'Trend', summary: '信号', evidence: ['P1'] }] };
     } else if (kind === 'trends') {
-      result = { entries: [{ title: 'Trend', summary: '趋势', evidence: ['P1'], timeline: [{ date: input.sources[0].date, summary: '出现证据', evidence: ['P1'] }] }] };
+      assert.deepEqual(input.observations[0].dates, ['2026-11-18']);
+      result = { lines: [{ title: 'Trend', summary: '趋势', prior: 0, observations: [1] }] };
     } else {
       result = { title: 'Report', summary: '日报', sections: [{ title: '摘要', summary: '材料', evidence: ['P1'] }] };
     }
@@ -275,7 +276,7 @@ test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久�
   assert.deepEqual(result.trends[0].timeline[0].evidence, [id]);
   assert.deepEqual(result.reports[0].evidence, [id]);
   assert.ok(requests.every(({ request, url }) => request.reasoning_effort === 'max' && url.endsWith('/v1/chat/completions')));
-  assert.ok(requests.every(({ input }) => (input.posts ?? input.sources).every(({ id }) => id === 'P1')));
+  assert.ok(requests.every(({ input }) => (input.posts ?? input.sources ?? []).every(({ id }) => id === 'P1')));
   assert.deepEqual(requests.filter(({ kind }) => kind === 'score').map(({ request }) => request.max_tokens), [16384, 32768]);
   assert.ok(requests.filter(({ kind }) => kind === 'ideas')[1].system.includes('上次响应'));
   assert.equal(new Set(requests.filter(({ kind }) => kind === 'trends').map(({ session }) => session)).size, 1);

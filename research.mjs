@@ -293,7 +293,7 @@ function modelClient(db, options) {
       const endpoint = new URL(base.replace(/\/+$/, '').replace(/(?:\/chat\/completions)?$/, '/chat/completions'));
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
       if (endpoint.hostname === 'opencode.ai') headers['x-opencode-session'] = `ses_${session}-${kind.startsWith('trend') ? 'trends' : kind}`;
-      for (const maxTokens of [8_192, 16_384]) {
+      for (const maxTokens of [16_384, 32_768]) {
         const calledAt = new Date().toISOString();
         let actualModel = model;
         let outcome = 'failed';

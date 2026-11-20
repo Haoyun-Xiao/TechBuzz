@@ -276,7 +276,7 @@ test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久�
   assert.deepEqual(result.reports[0].evidence, [id]);
   assert.ok(requests.every(({ request, url }) => request.reasoning_effort === 'max' && url.endsWith('/v1/chat/completions')));
   assert.ok(requests.every(({ input }) => (input.posts ?? input.sources).every(({ id }) => id === 'P1')));
-  assert.deepEqual(requests.filter(({ kind }) => kind === 'score').map(({ request }) => request.max_tokens), [8192, 16384]);
+  assert.deepEqual(requests.filter(({ kind }) => kind === 'score').map(({ request }) => request.max_tokens), [16384, 32768]);
   assert.ok(requests.filter(({ kind }) => kind === 'ideas')[1].system.includes('上次响应'));
   assert.equal(new Set(requests.filter(({ kind }) => kind === 'trends').map(({ session }) => session)).size, 1);
   assert.ok(result.modelCalls.some(({ model, reasoningEffort, outcome }) => model === 'deepseek-v4.1-flash' && reasoningEffort === 'max' && outcome === 'truncated'));

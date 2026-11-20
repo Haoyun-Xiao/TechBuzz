@@ -401,6 +401,7 @@ function postCard(post, { detail = false, evidence = false, grouped = false } = 
     ${summary ? `<p class="post-summary">${esc(summary)}</p>` : ""}
     ${original && (detail || !summary) ? `<p class="post-original${detail ? "" : " clip"}">${esc(original)}</p>` : ""}
     ${rating.reason || strength || breakdown ? `<details class="score-note"${detail ? " open" : ""}><summary>评分依据${strength ? `（证据${strength}）` : ""}</summary>${rating.reason ? `<p>${esc(rating.reason)}</p>` : ""}${breakdown}</details>` : ""}
+    ${rating.scoredAs ? `<p class="score-note">评分基于${internal("整串内容", "post", rating.scoredAs)}。</p>` : ""}
     ${tagList(rating.topics, "topic")}
     ${tagList(rating.companies, "company")}
     ${contextBlock(post, "quoted", "被引用内容")}

@@ -33,6 +33,7 @@ for (const receipt of data.ideaReceipts || []) {
   }
 }
 data.mode = 'snapshot';
+data.ideaReceipts = (data.ideaReceipts || []).filter(receipt => receipt.status === 'completed');
 data.posts = data.posts.map(p => ({
   id:p.id, handle:p.handle, url:p.url, publishedAt:p.publishedAt, text:excerpt(p.text),
   kind:p.kind, sample:p.sample, contextStatus:p.contextStatus, evidenceKey:p.evidenceKey,

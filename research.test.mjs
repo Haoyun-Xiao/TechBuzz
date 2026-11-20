@@ -281,3 +281,84 @@ test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久�
   assert.equal(new Set(requests.filter(({ kind }) => kind === 'trends').map(({ session }) => session)).size, 1);
   assert.ok(result.modelCalls.some(({ model, reasoningEffort, outcome }) => model === 'deepseek-v4.1-flash' && reasoningEffort === 'max' && outcome === 'truncated'));
 });
+
+test('同作者串共享根评分，缓存可复用且跨日发布独立保留依据', async () => {
+  const db = new DatabaseSync(':memory:');
+  initResearch(db);
+  const root = { ...post('high', '18'), publishedAt: '2026-10-01T12:00:00+08:00', handle: 'author' };
+  const first = post('reply1', '19', { handle: 'author', threadRootId: 'high', text: '第一次跟帖，属于昨日' });
+  const next = post('reply2', '20', { handle: 'author', threadRootId: 'high', text: '追加跟帖，属于今日', publishedAt: '2026-11-20T07:30:00+08:00' });
+  root.thread = [first, next];
+  const logged = [];
+  const base = fakeModel([]);
+  const complete = async (request) => {
+    const { kind, input } = request;
+    logged.push(request);
+    if (kind === 'trends') {
+      return {
+        entries: [{
+          id: input.known.find(({ title }) => title === '作者续帖')?.id,
+          title: '作者续帖', summary: '持续跟踪串内内容',
+          evidence: input.sources.map(({ id }) => id),
+        }],
+      };
+    }
+    return base(request);
+  };
+
+  // A previously scored root already contained the collector-provided child.
+  let result = await analyze(db, [root], { now: '2026-11-19T23:59:59+08:00', complete });
+  assert.deepEqual(logged[0].input.posts[0].thread.map(({ id }) => id), ['reply1']);
+  assert.equal(result.ideas.length, 1);
+  logged.length = 0;
+  result = await analyze(db, [root, first, next], { now: '2026-11-19T23:59:59+08:00', complete });
+  assert.equal(logged.some(({ kind }) => kind === 'score' || kind === 'ideas'), false);
+  assert.equal(result.scores.reply1.scoredAs, 'high');
+  assert.equal(result.scores.reply1.score, result.scores.high.score);
+  assert.equal(result.scores.reply2, undefined);
+  assert.deepEqual(result.trends[0].evidence, ['reply1']);
+  assert.deepEqual(result.trends[0].timeline.map(({ date }) => date), ['2026-11-19']);
+
+  logged.length = 0;
+  result = await analyze(db, [root, first, next], { now: '2026-11-20T08:00:00+08:00', complete });
+  const scores = logged.find(({ kind }) => kind === 'score').input.posts;
+  assert.deepEqual(scores.map(({ id }) => id), ['high']);
+  assert.deepEqual(scores[0].thread.map(({ id }) => id), ['reply1', 'reply2']);
+  const ideas = logged.find(({ kind }) => kind === 'ideas').input.posts;
+  assert.deepEqual(ideas.map(({ id }) => id), ['high']);
+  assert.deepEqual(result.ideaReceipts[0].posts, [{ id: 'high', score: 85 }]);
+  assert.equal(result.scores.reply2.scoredAs, 'high');
+  const earlierTrendPost = logged.find(({ kind, input }) => kind === 'trend_batch' && input.date === '2026-11-19').input.posts[0];
+  assert.deepEqual(earlierTrendPost.assessment, { score: 85, scoredAs: 'high' });
+  assert.deepEqual(result.trends[0].evidence, ['reply1', 'reply2']);
+  assert.deepEqual(result.trends[0].timeline.map(({ date }) => date), ['2026-11-19', '2026-11-20']);
+  const reportPosts = logged.find(({ kind }) => kind === 'report').input.posts;
+  assert.deepEqual(reportPosts.map(({ id }) => id), ['reply1']);
+  assert.equal(reportPosts[0].text, first.text);
+  assert.equal(reportPosts[0].assessment, null);
+  assert.deepEqual(result.reports[0].evidence, ['reply1']);
+  assert.equal(db.prepare('SELECT COUNT(*) AS total FROM research_scores').get().total, 1);
+  db.close();
+});
+
+test('旧 Idea 的串内引用只合并当前证据，保留历史原帖 ID', async () => {
+  const db = new DatabaseSync(':memory:');
+  initResearch(db);
+  const root = post('high', '18', { handle: 'root-author' });
+  const child = post('child', '18', { handle: 'root-author', publishedAt: '2026-11-18T19:00:00+08:00' });
+  const logged = [];
+  const complete = fakeModel(logged);
+  let result = await analyze(db, [root, child], { now: '2026-11-18T20:00:00+08:00', complete });
+  const originalIdea = result.ideas[0];
+  assert.deepEqual(originalIdea.evidence, ['high', 'child']);
+
+  logged.length = 0;
+  result = await analyze(db, [root, { ...child, threadRootId: 'high' }], { now: '2026-11-18T21:00:00+08:00', complete });
+  assert.deepEqual(logged.find(({ kind }) => kind === 'score').input.posts.map(({ id }) => id), ['high']);
+  assert.deepEqual(result.ideas[0].history[0].evidence, ['high', 'child']);
+  assert.deepEqual(result.ideas[0].evidence, ['high']);
+  assert.equal(result.ideas[0].id, originalIdea.id);
+  assert.equal(result.scores.child.scoredAs, 'high');
+  assert.equal(db.prepare('SELECT COUNT(*) AS total FROM research_scores').get().total, 2);
+  db.close();
+});

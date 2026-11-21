@@ -2,7 +2,7 @@
 // publication time (none when it is unknown). Summary feeds never carry content:encoded; full feeds
 // inline bodies only for sources that explicitly allow redistribution. Titles come from the site's
 // name and categories.
-import { feedCategoryLabel, PUBLIC_API_CATEGORY_KEYS, toPublicApiCategory, type PublicApiCategoryKey } from "@techbuzz/contracts/taxonomy";
+import { CATEGORY_LABELS, feedCategoryLabel, PUBLIC_API_CATEGORY_KEYS, toPublicApiCategory, type PublicApiCategoryKey } from "@techbuzz/contracts/taxonomy";
 import { EDITION_WHEN, FEED_COPY, REPORTS, SITE, subjectAfter } from "@techbuzz/site";
 import { config } from "../config.ts";
 import { sql } from "../db.ts";
@@ -17,6 +17,7 @@ import { publicSourceName } from "./rules.ts";
 import { SELECTION } from "@techbuzz/industry/selection";
 import { browsedCondition, seatedCondition } from "./scope.ts";
 import { dailyUrl, itemUrl, periodUrl, siteUrl } from "./links.ts";
+import { RESEARCH_CATEGORY_KEYS, kindLabel, researchPublication, researchRequired, researchTime, timing, type ResearchDailies, type ResearchHot, type ResearchItems } from "./research.ts";
 
 interface FeedMeta {
   id: string;
@@ -147,6 +148,26 @@ export type ItemFeedKind = "selected" | "selected-full" | "all";
 // feed holds only its last 7 days (by original publish time).
 
 export async function itemFeed(kind: ItemFeedKind, category: PublicApiCategoryKey | null, { now = new Date() }: { now?: Date } = {}): Promise<string> {
+  if (researchPublication()) {
+    const mode = kind === "all" ? "all" : "selected";
+    const { items } = await researchRequired<ResearchItems>("/api/public/items", { mode, category, limit: 50 });
+    const meta = feedMeta(kind);
+    const label = category ? CATEGORY_LABELS[category] : mode === "all" ? "全部动态" : "精选";
+    const selfPath = category ? `/feed${kind === "selected-full" ? "/full" : ""}/category/${category}.xml` : meta.path;
+    return channel({ title: `${SITE.name} — ${label}`, description: `${SITE.name} 最新 50 条${label}及原帖链接。`,
+      homePath: meta.homePath, selfPath, ttl: meta.pollHintMinutes }, items.map((item) => {
+      const date = item.timeBasis === "unknown" ? null : item.activityAt;
+      const source = item.originalAuthor && item.originalAuthor.toLowerCase() !== item.handle.toLowerCase()
+        ? `@${item.handle} · 原作者 @${item.originalAuthor}` : `@${item.handle}`;
+      const time = item.activityAt
+        ? ` · ${timing[item.timeBasis]} ${researchTime(item.activityAt)}`
+        : ` · ${timing[item.timeBasis]}`;
+      return researchFeedItem({ id: mode === "all" ? item.id : `post:${item.postId}`, title: item.title, link: item.links.techbuzz, date, categories: item.category ? [item.category] : [],
+        description: `<p>${escapeXml(`${source} · ${kindLabel[item.kind]}${time}`)}</p>` +
+          (item.summary ? `<p>${escapeXml(item.summary)}</p>` : "") +
+          (item.links.original ? `<p><a href="${escapeXml(item.links.original)}">X 原帖</a></p>` : "") });
+    }));
+  }
   const includeContent = kind === "selected-full";
   const scope = kind === "all"
     ? sql`${browsedCondition(now)} AND coalesce(p.published_at, p.discovered_at) > ${now}::timestamptz - interval '7 days'
@@ -208,12 +229,40 @@ function issueXml(kind: ReportKind, r: FeedIssue): string {
 
 /** The daily, weekly or monthly feed: one item per issue, newest first. */
 export async function reportFeed(kind: ReportKind): Promise<string> {
+  if (kind === "daily" && researchPublication()) {
+    const { items } = await researchRequired<ResearchDailies>("/api/public/dailies", { limit: ISSUES_KEPT.daily });
+    return channel({ title: `${SITE.name} 研究日报`, description: "按北京时间归档的科技股研究日报。", homePath: "/daily", selfPath: "/feed/daily.xml", ttl: 30 },
+      items.map((report) => researchFeedItem({ id: `daily-${report.date}`, title: report.title, link: report.links.techbuzz,
+        date: report.updatedAt, description: `<p>${escapeXml(report.summary)}</p>` +
+          report.sections.map((section) => `<p><strong>${escapeXml(section.title)}</strong> ${escapeXml(section.summary)}</p>`).join("") })));
+  }
   const m = feedMeta(kind);
   const meta = { title: m.title, description: m.description, homePath: m.homePath, selfPath: m.path, ttl: m.pollHintMinutes };
   const items = (await feedIssues(kind, ISSUES_KEPT[kind])).map((r) => issueXml(kind, r));
   return channel(meta, items);
 }
 
+function researchFeedItem(item: { id: string; title: string; link: string; date: string | null; description: string; categories?: string[] }) {
+  const date = item.date ? new Date(item.date) : null;
+  return `    <item>
+      <title>${cdata(item.title)}</title>
+      <link>${escapeXml(item.link)}</link>
+      <description>${cdata(item.description)}</description>
+      ${(item.categories ?? []).map((label) => `<category>${escapeXml(label)}</category>`).join("")}
+      ${date && Number.isFinite(date.valueOf()) ? `<pubDate>${rfc822(date)}</pubDate>` : ""}
+      <guid isPermaLink="false">${escapeXml(item.id)}</guid>
+    </item>`;
+}
+
+export async function researchHotFeed() {
+  const { hot, singleHot } = await researchRequired<ResearchHot>("/api/public/hot");
+  return channel({ title: `${SITE.name} 48 小时热点`, description: "多源热点与单源高分。", homePath: "/hot", selfPath: "/feed/hot.xml", ttl: 30 },
+    [...hot.map((item) => ({ item, label: "多源热点" })), ...singleHot.map((item) => ({ item, label: "单源高分" }))]
+      .map(({ item, label }) => researchFeedItem({ id: `hot:${item.id}`, title: item.title, link: item.links.story, date: item.updatedAt,
+        description: `${label} · ${item.sourceCount} 个账号 · ${item.independentCount} 个独立来源`, categories: [label] })));
+}
+
 export function isFeedCategory(v: string): v is PublicApiCategoryKey {
-  return (PUBLIC_API_CATEGORY_KEYS as readonly string[]).includes(v);
+  const keys: readonly string[] = researchPublication() ? RESEARCH_CATEGORY_KEYS : PUBLIC_API_CATEGORY_KEYS;
+  return keys.includes(v);
 }

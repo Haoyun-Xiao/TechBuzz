@@ -26,16 +26,26 @@ import type { Screen } from "../components/shell/screens";
 
 // Stories are reached from the hot board, as long as the site shows it.
 const UP = navUp("/hot");
+import { loadResearch, researchEnabled, researchPage, evidenceSubset } from "../features/research/load.server";
+import { ResearchStory } from "../features/research/ResearchViews";
+import { project } from "../features/research/data";
+
 export const handle: Screen = { home: UP.tab };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
 export async function loader({ params, request }: Route.LoaderArgs) {
+  if (researchEnabled()) {
+    const dashboard = await loadResearch(request);
+    const event = [...dashboard.hot, ...dashboard.singleHot].find((entry) => entry.id === params.publicId);
+    if (event) return researchPage({ research: { event, data: project(dashboard, evidenceSubset(dashboard, event.evidence)) } });
+  }
   const story = await loadOr404<StoryDetail>(`/api/site/stories/${encodeURIComponent(params.publicId)}`, { signal: request.signal, merged: (id) => `/story/${id}` });
   return cachedPage(300, { story });
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) return pageMeta({ title: loaderData.research.event.title, path: `/story/${encodeURIComponent(loaderData.research.event.id)}` });
   if (!loaderData) return [{ title: titled("事件不存在") }, { name: "robots", content: "noindex" }];
   const s = loaderData.story;
   return pageMeta({
@@ -139,7 +149,12 @@ type Order = "desc" | "asc";
 const viewCache = sessionCache<{ savedAt: number; filter: Filter; order: Order }>("techbuzz:story-view:", 30 * 60 * 1000);
 
 export default function StoryPage() {
-  const { story } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchStory entry={result.research.event} data={result.research.data} />;
+  return <StandaloneStory {...result} />;
+}
+
+function StandaloneStory({ story }: Pick<Exclude<Awaited<ReturnType<typeof useLoaderData<typeof loader>>>, { research: unknown }>, "story">) {
   const entry = useLocation().key;
   const [filter, setFilter] = useState<Filter>(() => viewCache.peek(entry)?.filter ?? "all");
   const [order, setOrder] = useState<Order>(() => viewCache.peek(entry)?.order ?? "desc");

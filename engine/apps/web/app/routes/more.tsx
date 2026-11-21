@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { POLICY, SITE } from "@techbuzz/site";
 import { PhoneBar } from "../components/shell/PhoneBar";
-import { inNav, sidebar } from "../components/shell/nav";
+import { inNav, sidebar, useResearchMode } from "../components/shell/nav";
 import type { Screen } from "../components/shell/screens";
 import { edgeTtl } from "../lib/api.server";
 import { webModules } from "../site-modules";
@@ -13,14 +13,14 @@ import { ThemeSwitch } from "../components/shell/ThemeSwitch";
 import { Filings } from "../components/shell/Filings";
 import { IconBookmark, IconChevronRight, IconGrid, IconHeart, IconMoon, IconPlug } from "../components/icons";
 
-export const handle: Screen = { tab: "me", name: "我的" };
+export const handle: Screen = { tab: "me", name: "更多" };
 
 export function headers() {
   return edgeTtl(300);
 }
 
 export function meta() {
-  return pageMeta({ title: "我的", path: "/more", noindex: true });
+  return pageMeta({ title: "更多", path: "/more", noindex: true });
 }
 
 /**
@@ -62,6 +62,8 @@ function RowLink({ row }: { row: Row }) {
 }
 
 export default function MorePage() {
+  const research = useResearchMode();
+  const title = research ? "更多" : "我的";
   const starred = useStarred();
   const font = useFontPreference();
   // The count is this browser's: shown once the page runs here, never in the shared server copy.
@@ -70,12 +72,12 @@ export default function MorePage() {
   const Account = webModules().find((m) => m.account)?.account;
   return (
     <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
-      <PhoneBar title="我的" large />
-      <h1 className="hidden pb-4 pt-1 text-[22px] font-bold text-ink lg:block">我的</h1>
+      <PhoneBar title={title} />
+      <h1 data-page-title="" className="pb-4 pt-1 text-[30px] font-bold text-ink lg:text-[22px]">{title}</h1>
       <div className="wide:grid wide:grid-cols-2 wide:items-start wide:gap-x-4 2xl:grid-cols-3">
         <Group>
           {Account && <Account place="me" />}
-          <RowLink row={{ to: "/starred", label: "收藏", icon: <IconBookmark size={20} />, detail: here && starred.length > 0 ? <span className="num">{starred.length}</span> : undefined }} />
+          {!research && <RowLink row={{ to: "/starred", label: "收藏", icon: <IconBookmark size={20} />, detail: here && starred.length > 0 ? <span className="num">{starred.length}</span> : undefined }} />}
           <li className="flex min-h-[56px] items-center gap-3 px-4 text-[16px] font-medium text-ink">
             <span className="text-ink-3">
               <IconMoon size={20} />
@@ -92,15 +94,14 @@ export default function MorePage() {
             </Select>
           </li>
         </Group>
-        <Group title="投研">{sidebar().find(section => section.title === "投研")?.items.map(item => <RowLink key={item.to} row={{ to: item.to, label: item.label, icon: <item.icon size={20} /> }} />)}</Group>
-        <Group title="工具与入口">
-          {tools().map((r) => (
-            <RowLink key={r.to} row={r} />
+        {research ? <Group>
+          {sidebar(true).find((section) => section.title === "更多")?.items.map((item) => (
+            <RowLink key={item.to} row={{ to: item.to, label: item.label, icon: <item.icon size={20} /> }} />
           ))}
-        </Group>
-        <Group title="关于">
-          <RowLink row={{ to: "/about", label: `关于 ${SITE.name}`, icon: <IconHeart size={20} /> }} />
-        </Group>
+        </Group> : <>
+          <Group title="工具与入口">{tools().map((row) => <RowLink key={row.to} row={row} />)}</Group>
+          <Group title="关于"><RowLink row={{ to: "/about", label: `关于 ${SITE.name}`, icon: <IconHeart size={20} /> }} /></Group>
+        </>}
       </div>
       <div className="mt-6 flex flex-wrap justify-center gap-x-4 gap-y-1 text-[12px] leading-[2] text-ink-4">
         <Link viewTransition to="/terms" className="hover:text-ink-2">{POLICY.terms.name}</Link>

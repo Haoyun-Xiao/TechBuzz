@@ -1,6 +1,6 @@
 import { useLoaderData } from "react-router";
 import { IntentLink } from "../components/ui/IntentLink";
-import type { ReportIndexEntry, ReportIndexResponse } from "@techbuzz/contracts/site";
+import type { ReportIndexResponse, ReportNavigationEntry } from "@techbuzz/contracts/site";
 import { SITE, withSubject } from "@techbuzz/site";
 import { apiGet, cachedPage } from "../lib/api.server";
 import { pageReuse } from "../lib/page-reuse";
@@ -13,22 +13,31 @@ import { Rows, SectionPage } from "../features/report/ReportPaper";
 import { Nameplate } from "../features/report/Nameplate";
 import type { Screen } from "../components/shell/screens";
 
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { dailyIndex, ResearchDailyArchive } from "../features/research/ResearchDaily";
+
 export const handle: Screen = { tab: "daily", name: "往期" };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
 export async function loader({ request }: { request: Request }) {
+  if (researchEnabled()) {
+    const dashboard = await loadResearch(request);
+    return researchPage({ index: dailyIndex(dashboard.reports), research: dashboard.generation.report, today: "" });
+  }
   const { items: index } = await apiGet<ReportIndexResponse>("/api/site/reports/daily", { signal: request.signal });
   return cachedPage(600, { index, today: beijingDate(Date.now()) });
 }
 
-export function meta({ loaderData }: { loaderData?: { index: ReportIndexEntry[] } }) {
-  const entries = (loaderData?.index ?? []).map((e: ReportIndexEntry) => ({ path: `/daily/${e.key}`, name: e.title ? `${e.key} · ${e.title}` : `${SITE.name} 日报 · ${e.key}` }));
+export function meta({ loaderData }: { loaderData?: { index: ReportNavigationEntry[] } }) {
+  const entries = (loaderData?.index ?? []).map((e: ReportNavigationEntry) => ({ path: `/daily/${e.key}`, name: e.title ? `${e.key} · ${e.title}` : `${SITE.name} 日报 · ${e.key}` }));
   return pageMeta({ title: `${withSubject("日报")} · 历史存档`, description: `${SITE.name} 历史日报，按日期归档。`, path: "/daily/archive", image: "/og/pages/daily.png", jsonLd: archiveLd("/daily/archive", `${SITE.name} 日报 · 历史存档`, entries) });
 }
 
 export default function DailyArchive() {
-  const { index, today } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result && result.research) return <ResearchDailyArchive index={result.index} generation={result.research} />;
+  const { index, today } = result;
   const months = archiveGroups("daily", index);
   return (
     <ReportLayout kind="daily" index={index} current={null} today={today} back={{ to: "/daily", label: "日报" }} title="日报合订本">

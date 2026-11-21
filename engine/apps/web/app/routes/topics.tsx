@@ -13,15 +13,33 @@ import { PhoneBar } from "../components/shell/PhoneBar";
 import { navUp } from "../components/shell/nav";
 import type { Screen } from "../components/shell/screens";
 
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { ResearchTopics } from "../features/research/ResearchViews";
+
 export const handle: Screen = { home: navUp("/topics").tab, name: "主题" };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
 export async function loader({ request }: { request: Request }) {
+  if (researchEnabled()) {
+    const dashboard = await loadResearch(request);
+    const url = new URL(request.url);
+    const group = url.searchParams.get("group") === "issue" ? "issue" : "company";
+    const selected = ["1", "true"].includes(url.searchParams.get("onlyFeatured") ?? "");
+    const selectedIds = new Set(dashboard.featured.map((row) => row.postId));
+    const propagation = new Map(dashboard.featured.map((row) => [row.postId, row.distributors.length]));
+    const topics = dashboard.topics.filter((topic) => topic.group === group).map((topic) => {
+      const ids = selected ? topic.postIds.filter((id) => selectedIds.has(id)) : topic.postIds;
+      return { name: topic.name, group: topic.group, count: selected ? ids.length : topic.count,
+        propagationCount: selected ? ids.reduce((sum, id) => sum + (propagation.get(id) ?? 0), 0) : topic.propagationCount, postIds: [] };
+    }).filter((topic) => topic.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+    return researchPage({ research: topics });
+  }
   return cachedPage(300, await apiGet<TopicsResponse>("/api/site/topics", { signal: request.signal }));
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) return pageMeta({ title: "主题", path: "/topics" });
   if (!loaderData) return pageMeta({ title: SITE.topicsTitle, path: "/topics", image: "/og/pages/topics.png" });
   const { groups, topics } = loaderData;
   const by = groups.map((g) => g.name).join("、");
@@ -97,7 +115,12 @@ function TopicCard({ t }: { t: TopicSummary }) {
 }
 
 export default function TopicsPage() {
-  const { groups, topics } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchTopics topics={result.research} />;
+  return <StandaloneTopics {...result} />;
+}
+
+function StandaloneTopics({ groups, topics }: Pick<Exclude<Awaited<ReturnType<typeof useLoaderData<typeof loader>>>, { research: unknown }>, "groups" | "topics">) {
   return (
     <div className="pb-10">
       <PhoneBar back={{ to: "/more", label: "我的" }} title="主题" />

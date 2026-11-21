@@ -19,6 +19,10 @@ import { loadParts } from "../site-modules";
 
 // Topics are reached from the topics page, as long as the site shows it.
 const UP = navUp("/topics");
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { feedPage, ResearchFeed } from "../features/research/ResearchFeed";
+import { topicPath } from "../features/research/data";
+
 export const handle: Screen = { home: UP.tab };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
@@ -26,6 +30,15 @@ export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 /** Selected items of a topic: shared caches keep the page as long as its api answer (one minute). */
 export async function loader({ params, request }: Route.LoaderArgs) {
   if (/[\u0000-\u001f\u007f]/.test(params.slug)) throw new Response("Not found", { status: 404 });
+  if (researchEnabled()) {
+    const dashboard = await loadResearch(request);
+    const url = new URL(request.url);
+    const group = url.searchParams.get("group");
+    const topic = dashboard.topics.find((entry) => entry.name.toLowerCase() === params.slug.toLowerCase() && (!group || entry.group === group));
+    if (!topic) throw new Response("Not found", { status: 404 });
+    if (params.page) throw redirect(`${topicPath(topic)}&page=${encodeURIComponent(params.page)}`);
+    return researchPage({ research: feedPage(dashboard, url.searchParams, false, topic) });
+  }
   const page = params.page ? Number(params.page) : 1;
   if (params.page !== undefined && (!/^\d+$/.test(params.page) || page < 1)) throw new Response("Not found", { status: 404 });
   // Page 1 lives at the topic's own address (308).
@@ -59,6 +72,7 @@ function description(data: TopicPage, parts: Part[]): string {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) return pageMeta({ title: loaderData.research.topic?.name, path: "/topics" });
   if (!loaderData) return [{ title: titled("主题不存在") }, { name: "robots", content: "noindex" }];
   const data = loaderData.data;
   const { topic, page } = data;
@@ -90,7 +104,12 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function TopicRoute() {
-  const { data } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchFeed feed={result.research} />;
+  return <StandaloneTopic {...result} />;
+}
+
+function StandaloneTopic({ data }: Pick<Exclude<Awaited<ReturnType<typeof useLoaderData<typeof loader>>>, { research: unknown }>, "data">) {
   const { topic, items, page, pageCount, pageSize } = data;
   const parts = partsOf(data);
   const href = (p: number) => (p <= 1 ? `/topics/${topic.slug}` : `/topics/${topic.slug}/page/${p}`);

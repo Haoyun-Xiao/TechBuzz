@@ -1,3 +1,4 @@
+import { redirect } from "react-router";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Await, isRouteErrorResponse, Link, useAsyncError, useLoaderData, useNavigate, useRevalidator, type ClientLoaderFunctionArgs } from "react-router";
 import type { Route } from "./+types/item";
@@ -38,6 +39,7 @@ export { pageHeaders as headers } from "../lib/api.server";
 const PosterSheet = lazy(() => import("../features/item/PosterSheet"));
 
 export async function loader({ params, request }: Route.LoaderArgs) {
+  if (process.env.TECHBUZZ_RESEARCH_URL) throw redirect(`/research/posts/${encodeURIComponent(params.id)}`, 308);
   const item = await loadOr404<SiteItemDetail>(`/api/site/items/${encodeURIComponent(params.id)}`, { signal: request.signal });
   return cachedPage(600, { item, followups: await loadFollowups(item, request.signal) });
 }

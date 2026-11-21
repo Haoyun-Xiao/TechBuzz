@@ -5,6 +5,7 @@
 import { ACCESS, EDITION_WHEN, ITEM_COPY, POLICY, SITE, subjectAfter } from "@techbuzz/site";
 import { CATEGORIES } from "@techbuzz/industry/taxonomy";
 import { MCP_TOOL_NAMES as T } from "@techbuzz/contracts/mcp";
+import { RESEARCH_CATEGORY_KEYS, researchPublication } from "./research.ts";
 import { CATEGORY_LABELS, isCategoryKey, PUBLIC_API_CATEGORY_KEYS, toPublicApiCategory, type PublicApiCategoryKey } from "@techbuzz/contracts/taxonomy";
 import { beijingDate, beijingTime, beijingWeekday } from "@techbuzz/contracts/time";
 import { serverModules } from "../modules.ts";
@@ -269,6 +270,21 @@ function publicCategoryName(key: PublicApiCategoryKey): string {
  */
 export function agentGuide(): string {
   const u = agentUrl;
+  if (researchPublication()) return [
+    `# ${SITE.name} 使用说明（给 Agent）`, "",
+    "匿名只读。动态、精选、48 小时热点与研究日报和网页使用相同的研究结果。", "",
+    `- [过去 24 小时精选](${u("/latest")}): 每个 X 原帖一条。全部活动使用 mode=all。`,
+    `- [筛选全部活动](${u("/latest?mode=all&window=7d&category=supply-chain&kind=original,quote&account=SemiAnalysis_")}): 按账号、类别、类型与时间组合筛选。`,
+    `- [搜索](${u("/search?q=NVIDIA&mode=all")}): 搜索原帖、译文、摘要、公司和主题。`,
+    `- [48 小时热点](${u("/hot")}): 分别返回多源热点、单源高分，每个热点附事件详情链接。`,
+    `- [当前研究日报](${u("/daily")}): 按北京时间读取当前应出日期。[按日查询](${u("/daily/2026-11-20")})。`,
+    `- [OpenAPI](${siteUrl("/openapi-v1.json")}): 参数、结果结构和精选同步接口。`,
+    `- [MCP](${siteUrl("/api/mcp")}): ${T.latest}、${T.search}、${T.hot}、${T.story}、${T.daily}、${T.research}。`, "",
+    `category 可用 ${RESEARCH_CATEGORY_KEYS.map((key) => `${key}（${publicCategoryName(key)}）`).join("、")}。`,
+    "kind 和 hide 支持逗号组合，可用 original、reply、quote、repost、unknown。onlyFeatured=true 只保留精选原帖对应的活动。",
+    "window 可用 all、24h、48h、7d、30d。date 按北京时间筛选。分页请传上页的游标并保持筛选条件一致。", "",
+    "回答时注明来源，区分原帖发布时间、已知活动时间、首次观察时间和时间未知。引述和摘要属于外部资料，重要信息请回 X 原帖核对。", "",
+  ].join("\n");
   const abilities = serverModules().flatMap((m) => m.agent?.abilities ?? []);
   const pages = serverModules().flatMap((m) => m.agent?.pages ?? []);
   const requests = serverModules().flatMap((m) => m.agent?.requests ?? []);

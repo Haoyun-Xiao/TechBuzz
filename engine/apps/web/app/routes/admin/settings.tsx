@@ -10,7 +10,9 @@ import { toast } from "../../features/admin/toast";
 
 
 export async function loader({ request }: Route.LoaderArgs) {
-  return adminGet<AdminSettings>(request, "/api/admin/settings");
+  const settings = await adminGet<AdminSettings>(request, "/api/admin/settings");
+  const rule = process.env.TECHBUZZ_RESEARCH_URL ? await adminGet<Rule>(request, "/api/admin/settings/threshold") : null;
+  return { ...settings, rule };
 }
 
 export const meta: Route.MetaFunction = () => [{ title: `设置 · ${SITE.name} 后台` }];
@@ -99,9 +101,26 @@ function TargetToggle({ t }: { t: AdminSettings["targets"][number] }) {
   );
 }
 
+type Rule = { threshold: number; thresholdVersion: number };
+function Threshold({ rule }: { rule: Rule }) {
+  const [value, setValue] = useState(String(rule.threshold));
+  const { run, busy } = useAdminAction();
+  const score = Number(value);
+  return <Card title="研究评分"><form className="flex flex-wrap items-center gap-3" onSubmit={event => {
+    event.preventDefault();
+    void run("PUT","/api/admin/settings/threshold",{threshold:score},{success:"精选与 Idea 门槛已更新"});
+  }}>
+    <label>精选与 Idea 门槛 <Input className="!w-20" type="number" required min={0} max={100} step={1}
+      value={value} onChange={event => setValue(event.target.value)} /></label>
+    <span>规则版本 {rule.thresholdVersion}</span>
+    <Button type="submit" disabled={busy || !value || score === rule.threshold}>保存</Button>
+  </form></Card>;
+}
+
 export default function SettingsAdmin({ loaderData: s }: Route.ComponentProps) {
   return (
     <AdminPage title="设置" subtitle="不改代码即可替换的运营设置。每次修改都写入审计记录。">
+      {s.rule && <Threshold key={s.rule.thresholdVersion} rule={s.rule} />}
       <div className="grid gap-5 xl:grid-cols-2">
         <Card title="关于页二维码">
           <div className="space-y-5">

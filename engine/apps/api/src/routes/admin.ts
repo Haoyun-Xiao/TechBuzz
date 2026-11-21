@@ -36,6 +36,26 @@ export function registerAdmin(app: FastifyInstance) {
   // Who is signed in, and the CSRF token the admin pages send with their writes.
   app.get("/api/admin/me", adminHandler(async (_req, _reply, admin): Promise<AdminMe> => ({ name: admin.name, csrf: admin.csrf, dev: admin.dev })));
 
+  if (process.env.TECHBUZZ_RESEARCH_URL) {
+    const url = new URL("/api/admin/threshold", process.env.TECHBUZZ_RESEARCH_URL);
+    app.get("/api/admin/settings/threshold", adminHandler(async () => {
+      const upstream = await fetch(url, {signal: AbortSignal.timeout(5000)});
+      if (!upstream.ok) throw new Error("研究设置服务不可用");
+      return upstream.json();
+    }));
+    app.put("/api/admin/settings/threshold", adminHandler(async (req, reply) => {
+      const threshold = body(req).threshold;
+      if (typeof threshold !== "number" || !Number.isInteger(threshold) || threshold < 0 || threshold > 100) {
+        return sendProblem(req, reply, {status:400,code:"invalid_request",detail:"请输入 0 至 100 的整数。"});
+      }
+      const upstream = await fetch(url, {method:"POST",signal:AbortSignal.timeout(5000),
+        headers:{"content-type":"application/json",authorization:`Bearer ${process.env.TECHBUZZ_ADMIN_TOKEN ?? ""}`},
+        body:JSON.stringify({threshold})});
+      if (!upstream.ok) throw new Error("研究设置保存失败");
+      return upstream.json();
+    }));
+  }
+
   // Sources
   app.get("/api/admin/sources", adminHandler(async (req) => {
     const f = q(req);

@@ -20,6 +20,8 @@ import { v1Items } from "@techbuzz/backend/publication/v1";
 import { SearchBusyError } from "@techbuzz/backend/publication/pool";
 import { resolveStory, v1HotTopics, v1Story } from "@techbuzz/backend/publication/stories";
 import { dailyWithNotes, isPeriodKey, v1Period } from "@techbuzz/backend/publication/reports";
+import { RESEARCH_KINDS, RESEARCH_WINDOWS, RESEARCH_CATEGORY_INPUTS, ResearchQueryError, limitedHot, researchDailyAnswer, researchHotAnswer, researchItemsAnswer, researchPublication, researchRead, researchRequired, researchSearch, researchStoryAnswer, type ResearchDaily, type ResearchHot, type ResearchItems, type ResearchStory } from "@techbuzz/backend/publication/research";
+import { InvalidCursorError } from "@techbuzz/backend/lib/cursor";
 import { serverModules } from "@techbuzz/backend/modules";
 
 /** What each tool is for, in the order the instructions name them; the modules' come last. */
@@ -65,6 +67,7 @@ function safe<A>(tool: string, run: (args: A) => Promise<ReturnType<typeof ok> |
       return await run(args);
     } catch (error) {
       if (error instanceof SearchBusyError) return fail("busy", "搜索繁忙，请稍后再试。");
+      if (error instanceof ResearchQueryError || error instanceof InvalidCursorError) return fail("invalid_request", error.message);
       const log = requestLog.getStore();
       if (log) log.error({ err: error, tool }, "mcp tool failed");
       else console.error(JSON.stringify({ level: "error", msg: "mcp tool failed", tool, err: logError(error) }));
@@ -87,6 +90,27 @@ const SEARCH_INPUT = z.strictObject({
   window: z.enum(["24h", "7d"]).default("7d").describe("Search window. Defaults to the latest 7 days."),
   category,
   limit: z.number().int().min(1).max(30).default(10).describe("Maximum number of results, from 1 to 30."),
+});
+const researchKinds = z.string().regex(new RegExp(`^(?:${RESEARCH_KINDS.join("|")})(?:,(?:${RESEARCH_KINDS.join("|")}))*$`)).optional();
+const RESEARCH_LIST_FILTERS = {
+  category: z.enum(RESEARCH_CATEGORY_INPUTS).optional(),
+  kind: researchKinds.describe("An X activity kind or comma-separated list of kinds."),
+  hide: researchKinds.describe("Activity kinds to hide, separated by commas."),
+  account: z.string().regex(/^@?[a-z0-9_]{1,15}$/i).optional(),
+  onlyFeatured: z.boolean().optional(),
+  by: z.enum(["timeline", "published"]).optional(),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  company: z.string().min(1).max(100).optional(),
+  topic: z.string().min(1).max(100).optional(),
+  sort: z.enum(["new", "time", "old", "score"]).optional(),
+  cursor: z.string().min(1).max(520).optional(),
+  limit: z.number().int().min(1).max(30).default(10),
+};
+const RESEARCH_LATEST_INPUT = z.strictObject({
+  ...RESEARCH_LIST_FILTERS, window: z.enum(RESEARCH_WINDOWS).default("24h"), mode: z.enum(["selected", "all"]).default("selected"),
+});
+const RESEARCH_SEARCH_INPUT = z.strictObject({
+  ...RESEARCH_LIST_FILTERS, window: z.enum(RESEARCH_WINDOWS).default("7d"), mode: z.enum(["selected", "all"]).optional(), q: z.string().min(2).max(200),
 });
 const HOT_INPUT = z.strictObject({
   limit: z.number().int().min(1).max(10).default(10).describe("Maximum number of current topics, from 1 to 10."),
@@ -129,44 +153,59 @@ export function buildMcpServer(): McpServer {
 
 /** Every tool on a server, returning its answer text and data. */
 function registerTools(server: McpServer) {
+  const research = researchPublication();
   server.registerTool(
     T.latest,
     {
-      description: `Get the latest ${SITE.name} items for a 24-hour or 7-day briefing. Prefer selected mode unless the user explicitly asks for every public item. Do not use this for named-topic search or multi-source event context.`,
-      inputSchema: LATEST_INPUT,
+      description: research ? "Read the TechBuzz homepage's featured originals or the complete tracked X activity stream." : `Get the latest ${SITE.name} items for a 24-hour or 7-day briefing. Prefer selected mode unless the user explicitly asks for every public item. Do not use this for named-topic search or multi-source event context.`,
+      inputSchema: research ? RESEARCH_LATEST_INPUT : LATEST_INPUT,
       annotations: ANNOTATIONS,
     },
     safe(T.latest, async (args) => {
-      const query = { mode: args.mode, window: args.window, by: "timeline", category: args.category ?? null, q: null, limit: args.limit, cursor: null } as const;
+      if (research) {
+        const body = await researchRequired<ResearchItems>("/api/public/items", args);
+        return ok(researchItemsAnswer(body), { ...body });
+      }
+      const original = LATEST_INPUT.parse(args);
+      const query = { mode: original.mode, window: original.window, by: "timeline", category: original.category ?? null, q: null, limit: original.limit, cursor: null } as const;
       const res = await recent(`items:${JSON.stringify(query)}`, () => v1Items(query));
-      return ok(latestAnswer(res, { window: args.window, mode: args.mode, category: args.category ?? null, limit: args.limit }), { schemaVersion: 1, query: res.query, items: res.items });
+      return ok(latestAnswer(res, { window: original.window, mode: original.mode, category: original.category ?? null, limit: original.limit }), { schemaVersion: 1, query: res.query, items: res.items });
     }),
   );
 
   server.registerTool(
     T.search,
     {
-      description: `Search ${SITE.name}'s latest 7 days by a 2–200 character topic, company, model, product, or person. It searches editorial picks first and automatically expands to all public items only when picks have no result.`,
-      inputSchema: SEARCH_INPUT,
+      description: research ? "Search the tracked X activity and its research summaries. By default featured posts are searched first." : `Search ${SITE.name}'s latest 7 days by a 2–200 character topic, company, model, product, or person. It searches editorial picks first and automatically expands to all public items only when picks have no result.`,
+      inputSchema: research ? RESEARCH_SEARCH_INPUT : SEARCH_INPUT,
       annotations: ANNOTATIONS,
     },
     safe(T.search, async (args) => {
       const q = args.q.trim();
       if (q.includes("\0")) return fail("invalid_request", "搜索词不能包含 NUL 字符。");
       if ([...q].length < 2) return fail("invalid_request", "搜索词需要 2 到 200 个字符。");
-      const found = await searchItems(q, args.window, args.category ?? null, args.limit, (query) => recent(`items:${JSON.stringify(query)}`, () => v1Items(query)));
-      return ok(searchAnswer(found, { q, window: args.window, category: args.category ?? null }), { schemaVersion: 1, query: found.res.query, items: found.res.items });
+      if (research) {
+        const body = await researchSearch({ ...args, q });
+        return ok(researchItemsAnswer(body, q), { ...body });
+      }
+      const original = SEARCH_INPUT.parse(args);
+      const found = await searchItems(q, original.window, original.category ?? null, original.limit, (query) => recent(`items:${JSON.stringify(query)}`, () => v1Items(query)));
+      return ok(searchAnswer(found, { q, window: original.window, category: original.category ?? null }), { schemaVersion: 1, query: found.res.query, items: found.res.items });
     }),
   );
 
   server.registerTool(
     T.hot,
     {
-      description: `Get the current ${SITE.name} Top 10 with each event's one-based rank. Use this for 'what is hot now' and to discover valid story public IDs; use ${T.latest} for a chronological news list. Internal heat scores are not returned.`,
+      description: research ? "Read the past 48 hours of multi-source hot events and single-source high-score events, ranked separately." : `Get the current ${SITE.name} Top 10 with each event's one-based rank. Use this for 'what is hot now' and to discover valid story public IDs; use ${T.latest} for a chronological news list. Internal heat scores are not returned.`,
       inputSchema: HOT_INPUT,
       annotations: ANNOTATIONS,
     },
     safe(T.hot, async (args) => {
+      if (research) {
+        const body = limitedHot(await researchRequired<ResearchHot>("/api/public/hot"), args.limit);
+        return ok(researchHotAnswer(body, "mcp"), { ...body });
+      }
       const all = await recent("hot", () => v1HotTopics());
       const items = all.items.slice(0, args.limit);
       return ok(hotAnswer(all, args.limit, "mcp"), { schemaVersion: 1, count: items.length, items });
@@ -181,6 +220,12 @@ function registerTools(server: McpServer) {
       annotations: ANNOTATIONS,
     },
     safe(T.story, async (args) => {
+      if (research) {
+        const body = await researchRead<ResearchStory>(`/api/public/stories/${encodeURIComponent(args.public_id.trim())}`);
+        if (!body) return fail("not_found", `没有这个公开事件；只使用 ${T.hot} 返回的 public_id。`);
+        body.story.reports = body.story.reports.slice(0, args.report_limit);
+        return ok(researchStoryAnswer(body), { ...body });
+      }
       let found = await resolveStory(args.public_id.trim());
       if (found.kind === "merged") found = await resolveStory(found.target);
       const body = found.kind === "found" ? await v1Story(found.storyId) : null;
@@ -193,12 +238,17 @@ function registerTools(server: McpServer) {
   server.registerTool(
     T.daily,
     {
-      description: `Get ${SITE.name}'s edited daily overview, either the latest issue or a real YYYY-MM-DD date. Use this when the user asks for a daily report rather than a raw chronological list.`,
+      description: research ? "Read the research daily report for the current scheduled date or a specified Beijing calendar date." : `Get ${SITE.name}'s edited daily overview, either the latest issue or a real YYYY-MM-DD date. Use this when the user asks for a daily report rather than a raw chronological list.`,
       inputSchema: DAILY_INPUT,
       annotations: ANNOTATIONS,
     },
     safe(T.daily, async (args) => {
       if (args.date && !isValidDate(args.date)) return fail("invalid_request", `${args.date} 不是有效日期。`);
+      if (research) {
+        const body = await researchRead<ResearchDaily>(`/api/public/dailies/${args.date ?? "latest"}`);
+        if (!body) return fail("not_found", args.date ? `没有 ${args.date} 的研究日报。` : "当前应发布日期的研究日报尚未生成。");
+        return ok(researchDailyAnswer(body), { ...body });
+      }
       const res = await recent(`daily:${args.date ?? "latest"}`, () => dailyWithNotes(args.date ?? "latest"));
       if (!res) return fail("not_found", args.date ? `没有 ${args.date} 的公开日报。` : "还没有公开日报。");
       return ok(dailyAnswer(res.body.report, "mcp", res.notes), res.body);
@@ -224,18 +274,15 @@ function registerTools(server: McpServer) {
     );
   }
 
-  const researchService = process.env.TECHBUZZ_RESEARCH_URL;
   const name = T.research;
   server.registerTool(name, {
     description: "Read TechBuzz investment ideas, trend timelines, or research reports with cited evidence.",
     inputSchema: z.strictObject({ section: z.enum(["ideas", "trends", "reports"]), id: z.string().regex(/^[a-zA-Z0-9_-]+$/).optional(), limit: z.number().int().min(1).max(30).default(10) }),
     annotations: ANNOTATIONS,
   }, safe(name, async ({ section, id, limit }) => {
-    if (!researchService) return fail("unavailable", "研究服务尚未配置。");
-    const response = await fetch(new URL(`/api/${section}${id ? "/" + id : ""}`, researchService), { signal: AbortSignal.timeout(8000) });
-    if (response.status === 404) return fail("not_found", "未找到研究记录。");
-    if (!response.ok) throw new Error("Research service unavailable");
-    const data = await response.json();
+    if (!research) return fail("unavailable", "研究服务尚未配置。");
+    const data = await researchRead<unknown>(`/api/${section}${id ? "/" + id : ""}`);
+    if (data === null) return fail("not_found", "未找到研究记录。");
     const records = Array.isArray(data) ? data.slice(0, limit) : [data];
     return ok(JSON.stringify(records), { section, records });
   }));

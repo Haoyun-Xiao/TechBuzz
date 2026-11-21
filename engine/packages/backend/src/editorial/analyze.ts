@@ -483,6 +483,15 @@ export async function runAnalysis(a: AnalyzeInputArticle, opts: StepOpts = {}): 
   checkAnalysisRunning();
   // Missing article text waits for a later revision, before any paid step; displayable original posts keep their judgement.
   if (awaitsMaterial(a)) return { prefilter: null, scores: null, writing: null, structure: null };
+  if (process.env.TECHBUZZ_RESEARCH_URL && a.source.kind === "x_search" && a.xPost) {
+    // The research worker owns selection. Native publication still receives copy and a grounded fact.
+    const original = originalPostCopy(a.xPost, a.url);
+    const structure = await runStructure(a, opts);
+    const writing: NonNullable<AnalysisRun["writing"]> = original
+      ? { kind: "verbatim", model: null, titleZh: original.title, summaryZh: original.summary ?? "", reasonZh: null, receiptIds: [], reused: true }
+      : await mendWording(a, await runSummarize(a, opts), opts);
+    return { prefilter: null, scores: null, structure, writing };
+  }
   const prefilter = await runSelectionPrefilter(a, opts);
   if (prefilter.label === "BLOCK") return { prefilter, scores: null, writing: null, structure: null };
   const original = originalPostCopy(a.xPost, a.url);

@@ -44,6 +44,10 @@ data.posts = data.posts.map(p => ({
   article:p.article ? {title:p.article.title,url:p.article.url}:null,
   media:[], thread:(p.thread || []).map(item => ({id:item.id,url:item.url,handle:item.handle})),
 }));
+const excerptById = new Map(data.posts.map(post=>[post.id,post]));
+for (const group of ['activities','featured']) {
+  data[group] = data[group].map(item=>({...item,post:excerptById.get(item.postId)}));
+}
 data.activity = data.activity.map(item => ({ ...item, body: excerpt(item.body) }));
 data.sources = data.sources.map(s => ({
   handle:s.handle,lastSuccess:s.lastSuccess,lastAttempt:s.lastAttempt,status:s.status,

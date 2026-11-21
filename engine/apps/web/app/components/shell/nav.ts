@@ -1,10 +1,12 @@
 // Site navigation in one place: the desktop sidebar's sections and the phone tab bar's tabs, the engine's
 // and the site's modules'.
 import type { ReactNode } from "react";
+import { useRouteLoaderData } from "react-router";
+import type { loader } from "../../root";
 import { NAV, subjectAfter, withSubject } from "@techbuzz/site";
 import { webModules } from "../../site-modules";
 import {
-  IconBolt, IconBookmark, IconChart, IconDoc, IconFlame, IconGrid, IconHeart, IconList, IconPlug, IconSparkles, IconTrendUp, IconUsers, IconUser,
+  IconBolt, IconBookmark, IconDoc, IconFlame, IconGrid, IconHeart, IconList, IconMore, IconPlug, IconSparkles, IconTrendUp, IconUsers, IconUser,
 } from "../icons";
 
 export interface NavItem {
@@ -30,19 +32,6 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
     ],
   },
   {
-    title: "投研",
-    items: [
-      { to: "/research/#home", label: "投研看板", icon: IconGrid, end: true },
-      { to: "/research/#picks", label: "研究评分", icon: IconChart, end: true },
-      { to: "/research/#reports", label: "研究日报", icon: IconDoc, end: true },
-      { to: "/research/#ideas", label: "投资 Idea", icon: IconSparkles, end: true },
-      { to: "/research/#trends", label: "趋势跟踪", icon: IconTrendUp, end: true },
-      { to: "/research/#sources", label: "关注来源", icon: IconUsers, end: true },
-      { to: "/research/#saved", label: "研究收藏", icon: IconBookmark, end: true },
-      { to: "/research/#admin", label: "研究设置", icon: IconUser, end: true },
-    ],
-  },
-  {
     title: "更多",
     items: [
       { to: "/agent", label: "Agent 接入", icon: IconPlug },
@@ -50,6 +39,28 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
     ],
   },
 ];
+
+const RESEARCH_TABS: Tab[] = [
+  { key: "featured", to: "/featured", label: "精选", icon: IconBolt, covers: ["/"] },
+  { key: "all", to: "/all", label: "全部动态", icon: IconList, covers: ["/research/posts"] },
+  { key: "hot", to: "/hot", label: "热点榜", icon: IconFlame, covers: ["/story"] },
+  { key: "daily", to: "/daily", label: "日报", icon: IconDoc },
+  { key: "topics", to: "/topics", label: "主题", icon: IconGrid },
+  { key: "ideas", to: "/ideas", label: "Idea", icon: IconSparkles },
+  { key: "trends", to: "/trends", label: "趋势跟踪", icon: IconTrendUp },
+  { key: "starred", to: "/starred", label: "收藏", icon: IconBookmark },
+  { key: "me", to: "/more", label: "更多", icon: IconMore, covers: ["/sources", "/agent", "/about"] },
+];
+
+const RESEARCH_MORE: NavItem[] = [
+  { to: "/sources", label: "关注来源", icon: IconUsers },
+  { to: "/agent", label: "Agent 接入", icon: IconPlug },
+  { to: "/about", label: "关于", icon: IconHeart },
+];
+
+export function useResearchMode() {
+  return useRouteLoaderData<typeof loader>("root")?.researchMode ?? false;
+}
 
 /** Whether an engine page is a way in from the navigation (site.ts NAV.hidden); a hidden page still opens. */
 export const inNav = (to: string) => !(NAV.hidden as readonly string[]).includes(to);
@@ -73,7 +84,11 @@ export function navUp(entry: keyof typeof UP): { to: string; name: string; back:
  * The sidebar: the engine's sections with the modules' between 内容 and 更多; a module naming a section
  * that is already there adds to it.
  */
-export function sidebar(): Array<{ title: string; items: NavItem[] }> {
+export function sidebar(research = false): Array<{ title: string; items: NavItem[] }> {
+  if (research) return [
+    { title: "内容", items: RESEARCH_TABS.filter((tab) => tab.key !== "me") },
+    { title: "更多", items: RESEARCH_MORE },
+  ];
   const [content, ...rest] = SECTIONS;
   const more = rest.pop()!;
   const sections = [content!, ...rest].map((s) => ({ ...s, items: s.items.filter((i) => inNav(i.to)) }));
@@ -89,7 +104,7 @@ export function sidebar(): Array<{ title: string; items: NavItem[] }> {
 /** A sidebar entry is lit on its pages and the ones it covers (日报 also covers weekly and monthly reports). */
 export function sidebarIsActive(item: Pick<NavItem, "to" | "end" | "covers">, pathname: string): boolean {
   if (item.end) return pathname === item.to;
-  return [item.to, ...(item.covers ?? [])].some((to) => pathname === to || pathname.startsWith(`${to}/`));
+  return [item.to, ...(item.covers ?? [])].some((to) => pathname === to || (to !== "/" && pathname.startsWith(`${to}/`)));
 }
 
 /**
@@ -134,7 +149,8 @@ const ENGINE_TABS: Tab[] = [
 ];
 
 /** The tab bar: the engine's, the modules' before 我的. */
-export function tabs(): Tab[] {
+export function tabs(research = false): Tab[] {
+  if (research) return RESEARCH_TABS;
   return [...ENGINE_TABS.slice(0, -1).filter((t) => inNav(t.to)), ...webModules().flatMap((m) => m.tabs ?? []), ENGINE_TABS.at(-1)!];
 }
 
@@ -142,8 +158,9 @@ export function tabs(): Tab[] {
  * The rail that stands in for the sidebar on narrow desktops (unfolded foldables, tablets upright): the
  * tabs, with 全部 after 精选 since desktop pages have no 精选 | 全部 switch.
  */
-export function rail(): Tab[] {
-  const all = tabs();
+export function rail(research = false): Tab[] {
+  const all = tabs(research);
+  if (research) return all;
   if (!inNav("/all")) return all;
   const at = all.findIndex((t) => t.key === "featured") + 1;
   return [...all.slice(0, at), { key: "all", to: "/all", label: "全部", icon: IconList }, ...all.slice(at)];
@@ -151,6 +168,6 @@ export function rail(): Tab[] {
 
 /** A rail entry is lit on its pages; 我的 also on the pages that sit under it on phones. */
 export function railIsActive(tab: Tab, pathname: string, screenTab: TabKey | undefined): boolean {
-  if (tab.key === "me") return pathname === tab.to || screenTab === "me";
+  if (tab.key === "me" && !tab.covers) return pathname === tab.to || screenTab === "me" || screenTab === "starred";
   return sidebarIsActive({ to: tab.to, end: tab.to === "/", covers: tab.covers }, pathname);
 }

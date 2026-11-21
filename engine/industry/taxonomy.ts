@@ -11,7 +11,7 @@
  * tagColor 是飞书推送卡片里跟在标题后面的这一类小标签的颜色（飞书 text_tag 的颜色名）。
  * feedLabel 是分类 RSS 标题里的名字（不写就用 label）。公开接口、RSS 和 MCP 里要把一类并进另一类发布，写在站点设置里（site/site.ts 的 PUBLIC_CATEGORIES）。
  */
-export const CATEGORIES = [
+const HISTORICAL_CATEGORIES = [
   { key: "earnings", tagColor: "indigo", label: "业绩与指引", section: "业绩与市场", guide: "财报、电话会和公司正式指引，重点是收入、利润、资本开支、订单、业务分部或预期变化。" },
   { key: "markets", tagColor: "purple", label: "市场与估值", section: "业绩与市场", guide: "股价、估值、仓位、融资定价、交易结构与市场预期。以个股判断为主且有明确价格或估值口径时可归此类。" },
   { key: "supply-chain", tagColor: "turquoise", label: "产业链", section: "产业链与产品", guide: "供需、出货、订单、产能、良率、库存、交货周期、建设进度与价格。芯片、存储、光通信、设备、电力和数据中心都可归此类。" },
@@ -22,6 +22,13 @@ export const CATEGORIES = [
   { key: "tip", tagColor: "green", label: "教程", section: "技巧与观点", guide: "读者可以照着使用的方法、提示词、工具用法、工程实践复盘与技术讲解。重点是可复用的做法；单纯发布工具归产品，只有态度和预测而无做法归观点。", commentary: true },
   { key: "opinion", tagColor: "purple", label: "观点", section: "技巧与观点", guide: "重点是作者的解释、判断、主张、预测、评论或访谈观点。讨论市场不自动归行业，作者是名人不自动归观点。", commentary: true },
 ] as const satisfies ReadonlyArray<{ key: string; tagColor: string; label: string; feedLabel?: string; section: string; guide: string; commentary?: true }>;
+
+// Old keys remain readable in archived publications.
+const retiredCategories = new Set<string>(["ai-models", "ai-products", "paper", "tip"]);
+const researchTaxonomy = typeof process === "undefined" || Boolean(process.env.TECHBUZZ_RESEARCH_URL);
+export const CATEGORIES = researchTaxonomy
+  ? HISTORICAL_CATEGORIES.filter(category => !retiredCategories.has(category.key))
+  : HISTORICAL_CATEGORIES;
 
 /**
  * 这个行业最受关注的一类发布（AI 行业是新模型）：日报报头的“N 个新模型”、改分类后修订已出的报告都按它数。

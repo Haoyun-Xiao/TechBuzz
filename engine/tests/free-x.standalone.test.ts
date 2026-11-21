@@ -244,3 +244,22 @@ test("recent pagination passes arbitrary known IDs until it overlaps the previou
   assert.deepEqual(itemIds(next), ["111"]);
   assert.deepEqual(next.cursor.freeXFreshPages, completed);
 });
+
+test("unreadable own statuses become dated activities and existing terminal discoveries are seeded just once", async t => {
+  const now = Date.now();
+  const own = snowflake(now - 86_400_000), prior = snowflake(now - 2 * 86_400_000);
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    const url = new URL(input);
+    if (url.hostname === "api.fxtwitter.com" || url.pathname.includes("/status/")) return new Response("unavailable",{status:503});
+    if (url.pathname.endsWith("/rss")) return new Response("<rss><channel></channel></rss>");
+    return page([own]);
+  });
+  const first = await fetchFreeX("Alice", {freeXUnavailable:[{id:prior,author:"Alice",repost:false,reason:"not_found"}]});
+  assert.equal(first.items.length,0);
+  assert.deepEqual(first.activities.map(a=>[a.tweetId,a.kind,a.publishedAt,a.text]), [
+    [own,"authored",new Date(now - 86_400_000).toISOString(),undefined],
+    [prior,"authored",new Date(now - 2 * 86_400_000).toISOString(),undefined],
+  ]);
+  const second = await fetchFreeX("Alice",first.cursor);
+  assert.equal(second.activities.length,0);
+});

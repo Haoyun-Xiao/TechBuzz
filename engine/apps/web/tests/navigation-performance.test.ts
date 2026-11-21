@@ -34,7 +34,7 @@ let chrome:Browser;
 let safari:Browser;
 const api=fakeApi((url,res,req)=>{
   const p=url.pathname;
-  if(p==='/api/site/track')return;
+  if(p==='/api/site/track'||p==='/logo.svg')return;
   hits.push(req.url!);
   if(p===failing){res.statusCode=503;return {code:'unavailable'};}
   if(p==='/api/site/search/suggestions')return {topics:[{slug:'openai',name:'OpenAI',group:'company'}],hot:[{rank:1,title:'建议版本 '+suggestionsVersion,to:'/story/fixture'}]};
@@ -92,15 +92,15 @@ test('SSR list and visited query variants return offline without another read',a
     await expect(page.getByRole('link',{name:'性能检查文章',exact:true})).toBeVisible({timeout:1500});
     await context.setOffline(false);
     await page.getByRole('button',{name:/^筛选/}).click();
-    await page.getByRole('link',{name:'模型',exact:true}).click();
-    await expect(page.getByRole('link',{name:'分类 ai-models',exact:true})).toBeVisible();
+    await page.getByRole('link',{name:'业绩与指引',exact:true}).click();
+    await expect(page.getByRole('link',{name:'分类 earnings',exact:true})).toBeVisible();
     await page.getByRole('button',{name:/^筛选/}).click();
-    await page.getByRole('link',{name:'产品',exact:true}).click();
-    await expect(page.getByRole('link',{name:'分类 ai-products',exact:true})).toBeVisible();
+    await page.getByRole('link',{name:'市场与估值',exact:true}).click();
+    await expect(page.getByRole('link',{name:'分类 markets',exact:true})).toBeVisible();
     await context.setOffline(true);
     await page.goBack();
-    await expect(page.getByRole('link',{name:'分类 ai-models',exact:true})).toBeVisible({timeout:1500});
-    await expect(page.locator('link[rel=canonical]')).toHaveAttribute('href',origin+'/?category=ai-models');
+    await expect(page.getByRole('link',{name:'分类 earnings',exact:true})).toBeVisible({timeout:1500});
+    await expect(page.locator('link[rel=canonical]')).toHaveAttribute('href',origin+'/?category=earnings');
   }finally{await context.close();}
 });
 
@@ -153,17 +153,17 @@ test('a press on a selected link preserves visited data and the next revisit sta
   page.on('request',request=>{if(request.url().includes('.data'))requests.push(request.url());});
   try{
     await visit(page,origin+'/');
-    await page.getByRole('link',{name:'模型',exact:true}).click();
-    await expect(page.getByRole('link',{name:'分类 ai-models',exact:true})).toBeVisible();
-    await page.getByRole('link',{name:'模型',exact:true}).dispatchEvent('pointerdown',{button:0,pointerType:'mouse',isPrimary:true});
+    await page.getByRole('link',{name:'业绩与指引',exact:true}).click();
+    await expect(page.getByRole('link',{name:'分类 earnings',exact:true})).toBeVisible();
+    await page.getByRole('link',{name:'业绩与指引',exact:true}).dispatchEvent('pointerdown',{button:0,pointerType:'mouse',isPrimary:true});
     await page.waitForTimeout(150);
-    await page.getByRole('link',{name:'产品',exact:true}).click();
-    await expect(page.getByRole('link',{name:'分类 ai-products',exact:true})).toBeVisible();
-    await page.getByRole('link',{name:'产品',exact:true}).dispatchEvent('pointerdown',{button:0,pointerType:'mouse',isPrimary:true});
+    await page.getByRole('link',{name:'市场与估值',exact:true}).click();
+    await expect(page.getByRole('link',{name:'分类 markets',exact:true})).toBeVisible();
+    await page.getByRole('link',{name:'市场与估值',exact:true}).dispatchEvent('pointerdown',{button:0,pointerType:'mouse',isPrimary:true});
     await page.waitForTimeout(150);
     const before=requests.length;
-    await page.getByRole('link',{name:'模型',exact:true}).click();
-    await expect(page.getByRole('link',{name:'分类 ai-models',exact:true})).toBeVisible();
+    await page.getByRole('link',{name:'业绩与指引',exact:true}).click();
+    await expect(page.getByRole('link',{name:'分类 earnings',exact:true})).toBeVisible();
     assert.deepEqual(requests.slice(before),[],'neither prefetch nor navigation may evict and reload a still-valid visited page');
   }finally{await context.close();}
 });

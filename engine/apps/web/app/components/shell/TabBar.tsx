@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { useLocation, useRevalidator } from "react-router";
 import { IntentLink } from "../ui/IntentLink";
-import { tabs, type TabKey } from "./nav";
+import { railIsActive, tabs, type TabKey, useResearchMode } from "./nav";
 import { noteScreen, rememberedTab, useScreen } from "./screens";
 import { markBack } from "./transitions";
 import { scrollBehavior } from "../../lib/motion";
@@ -22,8 +22,10 @@ export function TabBar() {
   const revalidator = useRevalidator();
   const last = useRef<TabKey | undefined>(undefined);
   const restored = useSyncExternalStore(subscribe, () => rememberedTab(key), serverTab);
-  const items = tabs();
-  const requested = screen.tab ?? restored ?? last.current ?? screen.home;
+  const research = useResearchMode();
+  const items = tabs(research);
+  const byPath = research ? items.find((tab) => railIsActive(tab, pathname, screen.tab))?.key : undefined;
+  const requested = byPath ?? (screen.tab === "starred" && !research ? "me" : screen.tab) ?? restored ?? last.current ?? screen.home;
   const active = requested && !items.some((t) => t.key === requested) ? "featured" : requested;
   useIsoLayoutEffect(() => {
     // Do not overwrite a saved entry with the server fallback before hydration reads this browser's tab.
@@ -37,7 +39,8 @@ export function TabBar() {
       aria-label="底部导航"
       className="fixed inset-x-0 bottom-0 z-40 bg-surface/90 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shadow-[0_-1px_0_var(--line)] backdrop-blur-xl backdrop-saturate-150 lg:hidden"
     >
-      <div className="mx-auto grid h-[50px] max-w-[640px]" style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
+      <div className={`mx-auto grid max-w-[640px] ${research ? "grid-cols-5 auto-rows-[48px] sm:grid-cols-9" : "h-[50px]"}`}
+        style={research ? undefined : { gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}>
         {items.map((t) => {
           const on = t.key === active;
           const Icon = t.icon;
@@ -56,7 +59,7 @@ export function TabBar() {
               }}
               className={`relative flex flex-col items-center justify-center gap-[2px] text-[10.5px] transition-colors ${on ? "font-semibold text-accent" : "text-ink-3 active:text-ink"}`}
             >
-              <Icon size={23} />
+              <Icon size={research ? 20 : 23} />
               <span>{t.label}</span>
             </IntentLink>
           );

@@ -21,15 +21,26 @@ import { navUp } from "../components/shell/nav";
 import { scrollBehavior } from "../lib/motion";
 import type { Screen } from "../components/shell/screens";
 
-export const handle: Screen = { tab: navUp("/hot").tab, name: "热点" };
+import { loadResearch, researchEnabled, researchPage, evidenceSubset } from "../features/research/load.server";
+import { ResearchHot } from "../features/research/ResearchViews";
+import { project } from "../features/research/data";
+
+export const handle: Screen = { tab: navUp("/hot").tab, name: "热点榜" };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
 export async function loader({ request }: { request: Request }) {
+  if (researchEnabled()) {
+    const dashboard = await loadResearch(request);
+    const hot = dashboard.hot.slice(0, 10);
+    const singleHot = dashboard.singleHot.slice(0, 10);
+    return researchPage({ research: project(dashboard, { hot, singleHot, ...evidenceSubset(dashboard, [...hot, ...singleHot].flatMap((event) => event.evidence)) }) });
+  }
   return cachedPage(120, { hot: await loadOr404<HotResponse>("/api/site/hot", { signal: request.signal }) });
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) return pageMeta({ title: "热点榜", path: "/hot" });
   const hot = loaderData?.hot;
   const entries = hot?.entries ?? [];
   // A search result answers "what is hot today" with the three events the page leads with, dated by the ranking.
@@ -248,7 +259,12 @@ function showMethod() {
 }
 
 export default function HotPage() {
-  const { hot } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchHot data={result.research} />;
+  return <StandaloneHot {...result} />;
+}
+
+function StandaloneHot({ hot }: Pick<Exclude<Awaited<ReturnType<typeof useLoaderData<typeof loader>>>, { research: unknown }>, "hot">) {
   const [lead, ...rest] = hot.entries;
   const runners = rest.slice(0, 2);
   const others = rest.slice(2);

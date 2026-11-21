@@ -1,42 +1,54 @@
-import { posts, sources } from './collector.mjs';
+import { sources } from './collector.mjs';
 import { research } from './research.mjs';
+import { activityView, dashboardActivity, eventBoards } from './activity.mjs';
 
-// Count a repeated quotation once, while preserving its different distributors.
-export function rankEvents(rows, scores, now) {
-  const groups = new Map();
-  const dayAgo = now.valueOf() - 86400000;
-  for (const post of rows) {
-    const published = Date.parse(post.publishedAt);
-    if (!Number.isFinite(published) || published < dayAgo || published > now.valueOf()) continue;
-    const event = scores[post.id]?.event?.trim();
-    if (!event) continue;
-    const key = event.normalize('NFKC').toLowerCase();
-    if (!groups.has(key)) groups.set(key, { id: key, title: event, authors: new Set(), origins: new Map(), evidence: [], updatedAt: post.publishedAt });
-    const group = groups.get(key);
-    group.authors.add(post.handle);
-    const origin = post.evidenceKey || post.originId || post.id;
-    if (!group.origins.has(origin)) group.origins.set(origin, (post.repostOf?.handle || post.quoted?.handle || post.handle).toLowerCase());
-    group.evidence.push(post.id);
-    if (published > Date.parse(group.updatedAt)) group.updatedAt = post.publishedAt;
+function generationStatus(db, analysis, now, rows) {
+  const bjDay = ms => new Date(ms+8*3600000).toISOString().slice(0,10);
+  const date = bjDay(+now-86400000);
+  const due = now.getTime() >= Date.parse(date+'T00:00:00+08:00')+32*3600000;
+  const byId = new Map(rows.map(post=>[post.id,post]));
+  const latestEvidence = ids => ids.map(id=>byId.get(id)?.publishedAt).filter(Boolean).sort().at(-1) ?? null;
+  function state(kind, scope, entries) {
+    const job = analysis.jobs.find(j=>j.kind===kind && j.scope===scope);
+    const success=db.prepare('SELECT * FROM research_success WHERE kind=? AND scope=?').get(kind,scope);
+    let updatedAt=job?.updatedAt ?? null;
+    const lastSuccessAt=success?.succeeded_at ?? (job?.status==='completed'?updatedAt:entries.map(entry=>entry.updatedAt).filter(Boolean).sort().at(-1) ?? null);
+    let status=job?.status ?? 'pending';
+    let error=job?.error ?? null;
+    const scoring=analysis.jobs.find(j=>j.kind==='score' && j.scope==='current');
+    if(scoring && ['running','failed'].includes(scoring.status) && (!updatedAt || scoring.updatedAt>=updatedAt)) {
+      updatedAt=scoring.updatedAt;
+      if(scoring.status==='failed') {
+        status='failed';
+        error=`评分失败，等待重试：${scoring.error ?? ''}`;
+      } else if(status !== 'failed') {
+        status='pending';
+        error=null;
+      }
+    }
+    return {status,updatedAt,lastSuccessAt,error,
+      evidenceThrough:success ? success.through : latestEvidence(entries.flatMap(entry=>[...(entry.evidence??[]),...(entry.counterEvidence??[])]))};
   }
-  return [...groups.values()].filter(g => g.authors.size > 1).map(g => ({
-    id: g.id, title: g.title, independentCount: new Set(g.origins.values()).size,
-    sourceCount: g.authors.size, postCount: g.evidence.length, evidence: g.evidence, updatedAt: g.updatedAt
-  })).sort((a,b) => b.independentCount - a.independentCount || b.updatedAt.localeCompare(a.updatedAt));
+  const report=analysis.reports.find(r=>r.date===date);
+  const daily=state('report',date,report?[report]:[]);
+  if(!due) {daily.status='scheduled';daily.error=null;}
+  else if(report?.inputCount===0 && !report.sections?.length && daily.status==='completed') daily.status='insufficient';
+  return {ideas:state('ideas','current',analysis.ideas),trends:state('trends','current',analysis.trends),report:{...daily,date}};
 }
 
 export function dashboard(db, now = new Date()) {
   db.exec('BEGIN');
   try {
-    const rows = posts(db);
+    const view = activityView(db);
     const analysis = research(db);
-    const activity = db.prepare(`SELECT * FROM x_activity ORDER BY first_seen_at DESC`).all().map(row => ({
-      source: row.source_id.slice(2), tweetId: row.tweet_id, kind: row.kind,
-      author: row.author, url: row.url, publishedAt: row.published_at,
-      firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at, body: row.body,
+    const selection = dashboardActivity(view, analysis.scores, analysis.threshold);
+    const boards = eventBoards(selection.activities, analysis.scores, now, analysis.threshold);
+    const activity = db.prepare("SELECT * FROM x_activity WHERE kind = 'repost' ORDER BY first_seen_at DESC").all().map(row=>({
+      source:row.source_id.slice(2),tweetId:row.tweet_id,kind:row.kind,author:row.author,url:row.url,publishedAt:row.published_at,
+      firstSeenAt:row.first_seen_at,lastSeenAt:row.last_seen_at,body:row.body,
     }));
-    return { ...analysis, name: 'TechBuzz', mode: 'live', generatedAt: now.toISOString(),
-      sources: sources(db), posts: rows, activity, hot: rankEvents(rows, analysis.scores, now) };
+    return { ...analysis,activity, ...selection, ...boards, name:'TechBuzz',mode:'live',generatedAt:now.toISOString(),
+      sources:sources(db),posts:view.posts,generation:generationStatus(db,analysis,now,view.posts) };
   } finally {
     db.exec('COMMIT');
   }

@@ -1,6 +1,7 @@
 // RSS routes. Unknown query parameters are accepted and never change content.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { feedCacheControl, isFeedCategory, itemFeed, reportFeed, type ItemFeedKind } from "@techbuzz/backend/publication/feeds";
+import { feedCacheControl, isFeedCategory, itemFeed, reportFeed, researchHotFeed, type ItemFeedKind } from "@techbuzz/backend/publication/feeds";
+import { researchPublication } from "@techbuzz/backend/publication/research";
 import { serverModules } from "@techbuzz/backend/modules";
 import { applyPublicHeaders, sendTextWithEtag } from "../http/respond.ts";
 
@@ -16,7 +17,7 @@ function feedError(reply: FastifyReply) {
 
 export function registerFeeds(app: FastifyInstance) {
   // A preflight gets 204 and the allowed methods; feeds send no CORS headers.
-  for (const url of ["/feed.xml", "/feed/full.xml", "/feed/all.xml", "/feed/daily.xml", "/feed/weekly.xml", "/feed/monthly.xml", "/feed/category/:file", "/feed/full/category/:file"]) {
+  for (const url of ["/feed.xml", "/feed/full.xml", "/feed/all.xml", "/feed/hot.xml", "/feed/daily.xml", "/feed/weekly.xml", "/feed/monthly.xml", "/feed/category/:file", "/feed/full/category/:file"]) {
     app.options(url, async (_req, reply) => reply.code(204).header("Allow", "GET, HEAD, OPTIONS").send());
   }
   const item = (kind: ItemFeedKind) => async (req: FastifyRequest, reply: FastifyReply) => {
@@ -30,6 +31,15 @@ export function registerFeeds(app: FastifyInstance) {
   app.get("/feed.xml", item("selected"));
   app.get("/feed/full.xml", item("selected-full"));
   app.get("/feed/all.xml", item("all"));
+  app.get("/feed/hot.xml", async (req, reply) => {
+    if (!researchPublication()) return reply.code(404).type("text/plain; charset=utf-8").send("Not found");
+    try {
+      return await sendFeed(req, reply, await researchHotFeed(), feedCacheControl("selected"));
+    } catch (error) {
+      req.log.error({ err: error }, "feed error");
+      return feedError(reply);
+    }
+  });
   for (const kind of ["daily", "weekly", "monthly"] as const) {
     app.get(`/feed/${kind}.xml`, async (req, reply) => {
       try {

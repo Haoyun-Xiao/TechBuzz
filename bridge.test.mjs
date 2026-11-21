@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openDatabase } from './db.mjs';
 import { ingestPosts } from './collector.mjs';
 import { sourceIds, syncResearch } from './bridge.mjs';
+import { setThreshold } from './research.mjs';
 import { dashboard } from './dashboard.mjs';
 
 const x = (id, handle, extra = {}) => ({
@@ -36,7 +37,7 @@ test('the research cache takes engine revisions and references without polling o
       kind: 'original', text: 'full verified text', article: { text: 'verified long article' },
     });
     ingestPosts(db, [{ id: '42', handle: 'OrnnExchange', publishedAt: '2026-11-20T02:01Z', text: 'SQLite-only' }]);
-    db.prepare("UPDATE research_settings SET threshold = 82 WHERE id = 1").run();
+    setThreshold(db,82);
     const bridged = await syncResearch(db, query([root, reply, quoted, sample]));
     assert.deepEqual(bridged.map(post => post.id), ['4', '3', '2', '1']);
     assert.equal(bridged.find(post => post.id === '1').textZh, '已发布原帖的中文译文');
@@ -63,7 +64,8 @@ test('reposts remain separate observations with original attribution and timesta
     const foreign = row('7', 'SemiAnalysis_', '2026-11-20T00:00Z', { handle: 'other' });
     await syncResearch(db, query([foreign], states, [activity('other', 'x-semianalysis_', '99'), activity('SemiAnalysis_', 'x-semianalysis_', '100')]));
     const result = dashboard(db);
-    assert.equal(result.posts.length, 0);
+    assert.equal(result.posts.length, 2);
+    assert.deepEqual(result.activities.map(a=>a.timeBasis), ['unknown','unknown']);
     assert.equal(result.activity.length, 2);
     assert.deepEqual(result.activity.find(item => item.tweetId === '99'), {
       source: 'semianalysis_', tweetId: '99', kind: 'repost', author: 'other', url: 'https://x.com/other/status/99',

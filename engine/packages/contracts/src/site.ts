@@ -419,7 +419,7 @@ export interface SiteStats {
   /** Enabled sources in a daily shuffle, for the about page's river: one line per source. */
   sampleSources: Array<{ name: string; kind: string; heatOnly: boolean }>;
   /** The latest 精选, newest first. */
-  latest: Array<{ id: string; title: string; source: string }>;
+  latest: Array<{ id: string; title: string; source: string; href?: string }>;
 }
 
 export interface StoryFollowup {

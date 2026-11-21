@@ -1,10 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLoaderData, useLocation, type HeadersArgs } from "react-router";
 import type { ItemAvailability } from "@techbuzz/contracts/site";
 import { shortAddresses } from "@techbuzz/contracts/addresses";
 import { SITE } from "@techbuzz/site";
 import { Presence } from "../components/ui/Presence";
-import { edgeTtl } from "../lib/api.server";
 import { pageMeta } from "../lib/seo";
 import { exportBundle, importBundle, removeStar, useStarred, type ImportReport } from "../lib/local-state";
 import { fullDateTime } from "../lib/format";
@@ -14,10 +13,18 @@ import { PhoneBar } from "../components/shell/PhoneBar";
 import type { Screen } from "../components/shell/screens";
 import { webModules } from "../site-modules";
 
-export const handle: Screen = { tab: "me", name: "收藏" };
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { project } from "../features/research/data";
+import { ResearchStarred } from "../features/research/ResearchStarred";
 
-export function headers() {
-  return edgeTtl(300);
+export const handle: Screen = { tab: "starred", name: "收藏" };
+
+export function headers({ loaderHeaders }: HeadersArgs) {
+  return loaderHeaders.has("Cache-Control") ? loaderHeaders : { "Cache-Control": "public, s-maxage=300" };
+}
+
+export async function loader({ request }: { request: Request }) {
+  return researchEnabled() ? researchPage({ research: project(await loadResearch(request), {}) }) : { research: null };
 }
 
 export function meta() {
@@ -34,6 +41,11 @@ function reportText(r: ImportReport): string {
 }
 
 export default function StarredPage() {
+  const { research } = useLoaderData<typeof loader>();
+  return research ? <ResearchStarred base={research} /> : <StandaloneStarred />;
+}
+
+function StandaloneStarred() {
   const starred = useStarred();
   const [mounted, setMounted] = useState(false);
   const [availability, setAvailability] = useState<Record<string, ItemAvailability>>({});

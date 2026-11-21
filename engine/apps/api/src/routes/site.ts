@@ -17,7 +17,8 @@ import { itemAvailability } from "@techbuzz/backend/publication/availability";
 import { listTopicSummaries, loadTopicPage, topicBrowseLinks } from "@techbuzz/backend/publication/topics";
 import { loadHot, loadStoryDetail, resolveStory } from "@techbuzz/backend/publication/stories";
 import { listReports, loadReport, reportNavigation, loadReportNavigation, loadReportMonth, type ReportKind } from "@techbuzz/backend/publication/reports";
-import { looseQuery, QueryError, sendJsonWithEtag, sendProblem } from "../http/respond.ts";
+import { RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY, ResearchQueryError, researchPublication, researchRead, researchRequired, type ResearchDaily, type ResearchDailies, type ResearchHot } from "@techbuzz/backend/publication/research";
+import { looseQuery, QueryError, sendJsonWithEtag, sendProblem, strictQuery } from "../http/respond.ts";
 
 type Handler = (req: FastifyRequest, reply: FastifyReply) => Promise<unknown>;
 
@@ -28,7 +29,7 @@ export function siteHandler(fn: Handler): Handler {
     try {
       return await fn(req, reply);
     } catch (error) {
-      if (error instanceof BadRequest || error instanceof QueryError) return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: error.message });
+      if (error instanceof BadRequest || error instanceof QueryError || error instanceof ResearchQueryError) return sendProblem(req, reply, { status: 400, code: "invalid_request", detail: error.message });
       if (error instanceof InvalidCursorError) return sendProblem(req, reply, { status: 400, code: "invalid_cursor", detail: error.message });
       if (error instanceof SearchBusyError) {
         req.log = req.log.child({ reason: "search_capacity_exhausted" });
@@ -56,8 +57,28 @@ export function parseFilters(q: Record<string, string>): FilterParams {
 }
 
 export function registerSite(app: FastifyInstance) {
+  const siteResearch = (fn: Handler): Handler => siteHandler(async (req, reply) => {
+    if (!researchPublication()) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "research site not found" });
+    reply.header("Cache-Control", "no-store");
+    return fn(req, reply);
+  });
+  app.get("/api/site/research", siteResearch(async (_req, reply) => reply.send(await researchRequired("/api/dashboard"))));
+  app.get("/api/site/research/items", siteResearch(async (req, reply) => {
+    const params = strictQuery(req, RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY);
+    return reply.send(await researchRequired("/api/public/items", params));
+  }));
+  app.get("/api/site/research/hot", siteResearch(async (_req, reply) => reply.send(await researchRequired("/api/public/hot"))));
+  app.get("/api/site/research/topics", siteResearch(async (_req, reply) => reply.send(await researchRequired("/api/public/topics"))));
+  app.get("/api/site/research/reports", siteResearch(async (req, reply) => reply.send(await researchRequired("/api/public/dailies", looseQuery(req)))));
+  app.get("/api/site/research/reports/:date", siteResearch(async (req, reply) => {
+    const { date } = req.params as { date: string };
+    const report = await researchRead<ResearchDaily>(`/api/public/dailies/${encodeURIComponent(date)}`);
+    return report ? reply.send(report) : sendProblem(req, reply, { status: 404, code: "not_found", detail: "Research daily report not found" });
+  }));
+
   app.get("/api/site/timeline", siteHandler(async (req, reply) => {
     const q = looseQuery(req);
+    if (researchPublication()) return reply.header("Cache-Control", "no-store").send(await researchRequired("/api/public/items", { ...q, mode: "selected" }));
     const filters = parseFilters(q);
     const limit = Math.min(Math.max(Number(q.limit) || 20, 1), 40);
     const unfiltered = filters.channel === "all" && !filters.category && !filters.tag && !q.cursor;
@@ -72,6 +93,7 @@ export function registerSite(app: FastifyInstance) {
 
   app.get("/api/site/pool", siteHandler(async (req, reply) => {
     const q = looseQuery(req);
+    if (researchPublication()) return reply.header("Cache-Control", "no-store").send(await researchRequired("/api/public/items", { ...q, mode: "all" }));
     const filters = parseFilters(q);
     const page = Math.min(Math.max(Number(q.page) || 1, 1), 50);
     const search = q.q?.trim() ? q.q.trim().slice(0, 200) : null;
@@ -114,6 +136,9 @@ export function registerSite(app: FastifyInstance) {
   }));
 
   app.get("/api/site/stats", siteHandler(async (req, reply) => {
+    if (researchPublication()) {
+      return reply.header("Cache-Control", "no-store").send(await researchRequired("/api/public/stats"));
+    }
     return sendJsonWithEtag(req, reply, await loadSiteStats(), { etagPrefix: "stats", cacheControl: "public, max-age=300, s-maxage=300" });
   }));
 
@@ -124,10 +149,21 @@ export function registerSite(app: FastifyInstance) {
   }));
 
   app.get("/api/site/topics", siteHandler(async (req, reply) => {
+    if (researchPublication()) return reply.header("Cache-Control", "no-store").send(await researchRequired("/api/public/topics"));
     return sendJsonWithEtag(req, reply, await listTopicSummaries(), { etagPrefix: "topics", cacheControl: "public, max-age=300, s-maxage=300" });
   }));
 
   app.get('/api/site/search/suggestions', siteHandler(async (req, reply) => {
+    if (researchPublication()) {
+      const [topics, hot] = await Promise.all([
+        researchRequired<{ items: { name: string; group: string }[] }>("/api/public/topics"),
+        researchRequired<ResearchHot>("/api/public/hot"),
+      ]);
+      return reply.header("Cache-Control", "no-store").send({
+        topics: topics.items.slice(0, 8).map(item => ({ name: item.name, group: item.group === "company" ? "company" : "field", slug: `${encodeURIComponent(item.name)}?group=${item.group}` })),
+        hot: [...hot.hot, ...hot.singleHot].slice(0, 8).map(item => ({ title: item.title, rank: item.rank, to: `/story/${encodeURIComponent(item.id)}` })),
+      });
+    }
     const body: SearchSuggestions = { topics: topicBrowseLinks(), hot: await hotSearchLinks() };
     return sendJsonWithEtag(req, reply, body, { etagPrefix: 'suggestions', cacheControl: 'public, max-age=30, s-maxage=30, must-revalidate' });
   }));
@@ -140,12 +176,18 @@ export function registerSite(app: FastifyInstance) {
   }));
 
   app.get("/api/site/hot", siteHandler(async (req, reply) => {
+    if (researchPublication()) return reply.header("Cache-Control", "no-store").send(await researchRequired("/api/public/hot"));
     const data = await loadHot();
     return sendJsonWithEtag(req, reply, data, { etagPrefix: "hot", cacheControl: "public, max-age=30, s-maxage=30" });
   }));
 
   app.get("/api/site/stories/:publicId", siteHandler(async (req, reply) => {
     const publicId = (req.params as { publicId: string }).publicId;
+    if (researchPublication()) {
+      const story = await researchRead(`/api/public/stories/${encodeURIComponent(publicId)}`);
+      if (!story) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "story not found" });
+      return reply.header("Cache-Control", "no-store").send(story);
+    }
     const found = await resolveStory(publicId);
     if (found.kind === "merged") {
       return reply.code(308).header("Location", `/api/site/stories/${found.target}`).header("Cache-Control", "public, max-age=300").send({ mergedInto: found.target });
@@ -158,6 +200,10 @@ export function registerSite(app: FastifyInstance) {
 
   app.get("/api/site/reports/:kind", siteHandler(async (req, reply) => {
     const kind = (req.params as { kind: string }).kind;
+    if (kind === "daily" && researchPublication()) {
+      const data = await researchRequired<ResearchDailies>("/api/public/dailies", { limit: 180 });
+      return reply.header("Cache-Control", "no-store").send({ kind, ...data });
+    }
     if (!["daily", "weekly", "monthly"].includes(kind)) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "unknown report kind" });
     const body: ReportIndexResponse = { kind: kind as ReportKind, items: await listReports(kind as ReportKind) };
     return sendJsonWithEtag(req, reply, body, { etagPrefix: "reports", cacheControl: "public, max-age=60, s-maxage=60" });
@@ -166,6 +212,13 @@ export function registerSite(app: FastifyInstance) {
   // The latest report page needs its archive selector and the report in one HTTP request.
   app.get("/api/site/reports/:kind/latest-page", siteHandler(async (req, reply) => {
     const kind = (req.params as { kind: string }).kind;
+    if (kind === "daily" && researchPublication()) {
+      const [index, current] = await Promise.all([
+        researchRequired<ResearchDailies>("/api/public/dailies", { limit: 180 }),
+        researchRead<ResearchDaily>("/api/public/dailies/latest"),
+      ]);
+      return reply.header("Cache-Control", "no-store").send({ index: index.items, report: current?.report ?? null });
+    }
     if (!["daily", "weekly", "monthly"].includes(kind)) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "unknown report kind" });
     const index = await listReports(kind as ReportKind);
     const report = index[0] ? await loadReport(kind as ReportKind, index[0].key) : null;
@@ -191,6 +244,11 @@ export function registerSite(app: FastifyInstance) {
     const { kind, key } = req.params as { kind: string; key: string };
     if (!["daily", "weekly", "monthly"].includes(kind) || !/^\d{4}-(\d{2}(-\d{2})?|W\d{2})$/.test(key)) {
       return sendProblem(req, reply, { status: 404, code: "not_found", detail: "report not found" });
+    }
+    if (kind === "daily" && researchPublication()) {
+      const data = await researchRead<ResearchDaily>(`/api/public/dailies/${key}`);
+      if (!data) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "report not found" });
+      return reply.header("Cache-Control", "no-store").send(data.report);
     }
     const data = await loadReport(kind as ReportKind, key);
     if (!data) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "report not found", cacheControl: "public, max-age=60" });

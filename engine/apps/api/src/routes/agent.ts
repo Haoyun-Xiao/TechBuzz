@@ -8,6 +8,7 @@ import { agentGuide, dailyAnswer, hotAnswer, latestAnswer, periodAnswer, searchA
 import { v1Items } from "@techbuzz/backend/publication/v1";
 import { resolveStory, v1HotTopics, v1Story } from "@techbuzz/backend/publication/stories";
 import { dailyWithNotes, isPeriodKey, v1Period } from "@techbuzz/backend/publication/reports";
+import { RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY, limitedHot, researchDailyAnswer, researchHotAnswer, researchItemsAnswer, researchPublication, researchRead, researchRequired, researchSearch, researchStoryAnswer, type ResearchDaily, type ResearchHot, type ResearchItems, type ResearchStory } from "@techbuzz/backend/publication/research";
 import { serverModules } from "@techbuzz/backend/modules";
 import { QueryError, sendProblem, sendTextWithEtag, strictQuery } from "../http/respond.ts";
 import { enumParam, intParam, publicHandler, V1_OPERATIONS } from "./v1.ts";
@@ -24,6 +25,8 @@ function listParams(q: Record<string, string>) {
   };
 }
 
+const researchListParams = (q: Record<string, string>, window: string) => ({ ...q, window: q.window ?? (q.period === "24" ? "24h" : window), limit: intParam(q.limit, "limit", 1, 30, 10) });
+
 export function registerAgent(app: FastifyInstance) {
   app.get("/api/v1/agent", publicHandler(async (req, reply) => {
     strictQuery(req, []);
@@ -32,6 +35,11 @@ export function registerAgent(app: FastifyInstance) {
   }));
 
   app.get("/api/v1/agent/latest", publicHandler(async (req, reply) => {
+    if (researchPublication()) {
+      const q = researchListParams(strictQuery(req, RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY), "24h");
+      const body = await researchRequired<ResearchItems>("/api/public/items", q);
+      return markdown(req, reply, researchItemsAnswer(body), "agent-latest", V1_OPERATIONS.items.cacheControl);
+    }
     const q = strictQuery(req, ["window", "mode", "category", "limit"]);
     const p = { ...listParams(q), mode: enumParam(q.mode, "mode", ["selected", "all"] as const, "selected") };
     const res = await v1Items({ ...p, by: "timeline", q: null, cursor: null });
@@ -39,6 +47,13 @@ export function registerAgent(app: FastifyInstance) {
   }));
 
   app.get("/api/v1/agent/search", publicHandler(async (req, reply) => {
+    if (researchPublication()) {
+      const q = strictQuery(req, RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY);
+      const text = (q.q ?? "").trim();
+      if ([...text].length < 2 || [...text].length > 200) throw new QueryError("q must contain 2 to 200 characters.");
+      const body = await researchSearch(researchListParams({ ...q, q: text }, "7d"));
+      return markdown(req, reply, researchItemsAnswer(body, text), "agent-search", V1_OPERATIONS.items.cacheControl);
+    }
     const q = strictQuery(req, ["q", "window", "category", "limit"]);
     const text = (q.q ?? "").trim();
     if ([...text].length < 2 || [...text].length > 200) throw new QueryError("q must contain 2 to 200 characters.");
@@ -49,6 +64,10 @@ export function registerAgent(app: FastifyInstance) {
 
   app.get("/api/v1/agent/hot", publicHandler(async (req, reply) => {
     const q = strictQuery(req, ["limit"]);
+    if (researchPublication()) {
+      const body = await researchRequired<ResearchHot>("/api/public/hot");
+      return markdown(req, reply, researchHotAnswer(limitedHot(body, intParam(q.limit, "limit", 1, 10, 10)), "http"), "agent-hot", V1_OPERATIONS.hotTopics.cacheControl);
+    }
     return markdown(req, reply, hotAnswer(await v1HotTopics(), intParam(q.limit, "limit", 1, 10, 10), "http"), "agent-hot", V1_OPERATIONS.hotTopics.cacheControl);
   }));
 
@@ -57,6 +76,12 @@ export function registerAgent(app: FastifyInstance) {
     const limit = intParam(q.limit, "limit", 1, 50, 20);
     const publicId = (req.params as { publicId: string }).publicId;
     if (publicId.length > 128) throw new QueryError("publicId must be a short opaque id.");
+    if (researchPublication()) {
+      const body = await researchRead<ResearchStory>(`/api/public/stories/${encodeURIComponent(publicId)}`);
+      if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "没有这个公开事件。" });
+      body.story.reports = body.story.reports.slice(0, limit);
+      return markdown(req, reply, researchStoryAnswer(body), "agent-story", V1_OPERATIONS.storyByPublicId.cacheControl);
+    }
     let found = await resolveStory(publicId);
     if (found.kind === "merged") found = await resolveStory(found.target);
     const body = found.kind === "found" ? await v1Story(found.storyId) : null;
@@ -66,6 +91,11 @@ export function registerAgent(app: FastifyInstance) {
 
   app.get("/api/v1/agent/daily", publicHandler(async (req, reply) => {
     strictQuery(req, []);
+    if (researchPublication()) {
+      const body = await researchRead<ResearchDaily>("/api/public/dailies/latest");
+      if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "还没有发布过研究日报。" });
+      return markdown(req, reply, researchDailyAnswer(body), "agent-daily", V1_OPERATIONS.latestDaily.cacheControl);
+    }
     const res = await dailyWithNotes("latest");
     if (!res) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "还没有发布过日报。" });
     return markdown(req, reply, dailyAnswer(res.body.report, "http", res.notes), "agent-daily", V1_OPERATIONS.latestDaily.cacheControl);
@@ -75,6 +105,11 @@ export function registerAgent(app: FastifyInstance) {
     strictQuery(req, []);
     const date = (req.params as { date: string }).date;
     if (!isValidDate(date)) throw new QueryError("date must be a real YYYY-MM-DD calendar date.");
+    if (researchPublication()) {
+      const body = await researchRead<ResearchDaily>(`/api/public/dailies/${date}`);
+      if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `没有 ${date} 的研究日报。` });
+      return markdown(req, reply, researchDailyAnswer(body), "agent-daily", V1_OPERATIONS.dailyByDate.cacheControl);
+    }
     const res = await dailyWithNotes(date);
     if (!res) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `没有 ${date} 的日报；不要换一天冒充。`, cacheControl: "public, max-age=60" });
     return markdown(req, reply, dailyAnswer(res.body.report, "http", res.notes), "agent-daily", V1_OPERATIONS.dailyByDate.cacheControl);

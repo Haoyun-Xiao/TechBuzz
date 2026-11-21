@@ -9,9 +9,9 @@ const FX = "https://api.fxtwitter.com";
 const MINUTE = 60_000;
 const RESCAN_INTERVAL = 48 * 60 * MINUTE;
 const cooldowns = new Map<string, number>();
-type Found = { id: string; author: string; repost: boolean; pinned?: boolean; attempts?: number; retryAt?: number; missing?: number };
+type Found = { id: string; author: string; repost: boolean; pinned?: boolean; observedAt?: string; attempts?: number; retryAt?: number; missing?: number };
 type Unavailable = Pick<Found, "id" | "author" | "repost"> & { reason: "not_found" | "no_public_content" };
-type Activity = { tweetId: string; kind: "authored" | "repost"; author: string; url: string; publishedAt: string; text?: string };
+type Activity = { tweetId: string; kind: "authored" | "repost"; author: string; url: string; publishedAt: string; observedAt?: string; text?: string };
 const key = (f: Found) => `${f.repost ? "r" : "a"}:${f.id}`;
 function status(url: string): { author: string; id: string } | null {
   const m = /(?:https?:\/\/[^/]+)?\/([a-z0-9_]{1,15})\/status\/(\d{1,20})/i.exec(url);
@@ -204,7 +204,7 @@ export async function fetchFreeX(handle: string, cursor: Record<string, any>): P
   const discovered = new Map<string, Found>();
   const add = (f: Found) => {
     const id = key(f);
-    if (validFound(f) && !seen.has(id) && !waiting.has(id) && !unavailable.has(id)) discovered.set(id, f);
+    if (validFound(f) && !seen.has(id) && !waiting.has(id) && !unavailable.has(id)) discovered.set(id, discovered.get(id)?.observedAt ? discovered.get(id)! : f);
   };
   const oldPages = cursor.freeXPages && typeof cursor.freeXPages === "object" ? cursor.freeXPages : {};
   const oldFresh = cursor.freeXFreshPages && typeof cursor.freeXFreshPages === "object" ? cursor.freeXFreshPages : {};
@@ -223,7 +223,9 @@ export async function fetchFreeX(handle: string, cursor: Record<string, any>): P
     try {
       first = await read(null);
       successes++;
-      first.found.forEach(add);
+      // Only rows ahead of a previously observed head anchor are incremental observations.
+      const boundary = first.found.findIndex(f => anchor(f, handle) && oldLanes[lane]?.headIds.includes(f.id));
+      first.found.forEach((f, i) => add(i < boundary && !f.pinned ? { ...f, observedAt: new Date(now).toISOString() } : f));
     } catch (error) { errors.push(`${lane} timeline: ${String(error)}`); }
     try {
       const entries = await nitter(`${base}/rss`, (xml) => parseRss(xml, handle));
@@ -338,7 +340,7 @@ export async function fetchFreeX(handle: string, cursor: Record<string, any>): P
     if (seen.has(id)) return;
     const own = tweet.user.screen_name.toLowerCase() === handle.toLowerCase(), body = article?.text || tweet.full_text || "";
     const publishedAt = new Date(tweet.tweet_created_at).toISOString(), url = `https://x.com/${tweet.user.screen_name}/status/${tweet.id_str}`;
-    if (f.repost) activities.push({ tweetId: tweet.id_str, kind: "repost", author: tweet.user.screen_name, url, publishedAt, ...(body ? { text: body } : {}) });
+    if (f.repost) activities.push({ tweetId: tweet.id_str, kind: "repost", author: tweet.user.screen_name, url, publishedAt, observedAt: f.observedAt, ...(body ? { text: body } : {}) });
     if (own && Date.parse(publishedAt) >= cutoff && !seen.has(`a:${f.id}`)) {
       const item = tweetToCandidate(tweet);
       if (parent && item.xPost) item.xPost.replyContext = parent;
@@ -359,6 +361,23 @@ export async function fetchFreeX(handle: string, cursor: Record<string, any>): P
     if (sibling && hasContent(sibling)) accept(f, sibling);
     else if (!seen.has(id) && !waiting.has(id) && !unavailable.has(id)) waiting.set(id, f);
   }
+  // Keep the activity even when mirrors cannot supply the body. Seed older pending
+  // and terminal discoveries once when upgrading from a cursor without placeholders.
+  const listed = new Map(discovered);
+  for (const entry of results) for (const { f } of entry?.result.continuations ?? []) listed.set(key(f), f);
+  if (!cursor.freeXActivitiesVersion) {
+    for (const [id,f] of [...waiting,...unavailable]) if (!listed.has(id)) listed.set(id,f);
+  }
+  const have = new Set(activities.map(a => `${a.kind}:${a.tweetId}`));
+  for (const f of listed.values()) {
+    const kind = f.repost ? "repost" : "authored";
+    if (have.has(`${kind}:${f.id}`) || f.id.length < 18) continue;
+    if (!f.repost && f.author.toLowerCase() !== handle.toLowerCase()) continue;
+    const originalMs = Number(BigInt(f.id) >> 22n) + 1288834974657;
+    if (!f.repost && originalMs < cutoff) continue;
+    activities.push({ tweetId: f.id, kind, author: f.author, url: `https://x.com/${f.author}/status/${f.id}`,
+      publishedAt: new Date(originalMs).toISOString(), observedAt: f.repost ? f.observedAt : undefined });
+  }
   let detailFailures = 0;
   for (const entry of results) {
     if (!entry || entry.result.material || seen.has(key(entry.f))) continue;
@@ -376,5 +395,5 @@ export async function fetchFreeX(handle: string, cursor: Record<string, any>): P
   if (!successes && !results.some((entry) => entry?.result.material)) throw new Error(`Free X discovery failed: ${errors.join("; ")}`);
   const start = [Date.parse(cursor.xCoverageStart ?? ""), ...dates].filter(Number.isFinite), end = [Date.parse(cursor.xCoverageEnd ?? ""), ...dates].filter(Number.isFinite);
   const backfillComplete = Object.keys(pages).length === 2 && Object.values(pages).every((p) => p === null);
-  return { items, activities, cursor: { ...cursor, freeXSeen: [...seen], freeXPending: [...waiting.values()], freeXUnavailable: [...unavailable.values()], freeXPages: pages, freeXFreshPages: freshPages, freeXLanes: lanes, backfillComplete, freeXDetailFailures: detailFailures, freeXBackfill: { pending: !backfillComplete || Object.values(freshPages).some(Boolean) || waiting.size > 0, errors }, xCoverageStart: start.length ? new Date(Math.min(...start)).toISOString() : null, xCoverageEnd: end.length ? new Date(Math.max(...end)).toISOString() : null } };
+  return { items, activities, cursor: { ...cursor, freeXActivitiesVersion: 1, freeXSeen: [...seen], freeXPending: [...waiting.values()], freeXUnavailable: [...unavailable.values()], freeXPages: pages, freeXFreshPages: freshPages, freeXLanes: lanes, backfillComplete, freeXDetailFailures: detailFailures, freeXBackfill: { pending: !backfillComplete || Object.values(freshPages).some(Boolean) || waiting.size > 0, errors }, xCoverageStart: start.length ? new Date(Math.min(...start)).toISOString() : null, xCoverageEnd: end.length ? new Date(Math.max(...end)).toISOString() : null } };
 }

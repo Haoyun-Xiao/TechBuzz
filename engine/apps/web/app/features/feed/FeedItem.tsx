@@ -31,9 +31,10 @@ export interface FeedItemProps {
   star?: React.ReactNode;
   scoreLabel?: string;
   reasonLabel?: string;
+  details?: React.ReactNode;
 }
 
-export const FeedItem = memo(function FeedItem({ item, group, filters, read = false, onOpen, showTags = false, at, targetTo, star, scoreLabel, reasonLabel }: FeedItemProps) {
+export const FeedItem = memo(function FeedItem({ item, group, filters, read = false, onOpen, showTags = false, at, targetTo, star, scoreLabel, reasonLabel, details }: FeedItemProps) {
   const isX = item.channel === "x" && !!item.x;
   const open = () => {
     rememberPreview(item);
@@ -103,6 +104,8 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
           ))}
         </div>
       )}
+
+      {details}
 
       {item.sameEvent && (
         <p className="relative z-10 mt-2 line-clamp-1 text-[12.5px] text-ink-4">

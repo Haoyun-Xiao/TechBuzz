@@ -1,3 +1,4 @@
+import { redirect } from "react-router";
 import type { Route } from "./+types/item-original";
 import type { SiteItemDetail } from "@techbuzz/contracts/site";
 import { cachedPage, loadOr404 } from "../lib/api.server";
@@ -7,6 +8,7 @@ export { default, handle, headers, meta } from "./item";
 
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 export async function loader({ params, request }: Route.LoaderArgs) {
+  if (process.env.TECHBUZZ_RESEARCH_URL) throw redirect(`/research/posts/${encodeURIComponent(params.id)}`, 308);
   const item = await loadOr404<SiteItemDetail>(`/api/site/items/${encodeURIComponent(params.id)}/original`, { signal: request.signal });
   return cachedPage(600, { item, followups: await loadFollowups(item, request.signal) });
 }

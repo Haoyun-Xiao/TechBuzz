@@ -1,4 +1,4 @@
-import { data, useLoaderData } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/report-detail";
 import { REPORT_NAMES, type ReportDetail, type ReportNavigationResponse, type ReportKind } from "@techbuzz/contracts/site";
 import { SITE, subjectAfter } from "@techbuzz/site";
@@ -10,6 +10,10 @@ import { ReportLayout } from "../features/report/ReportLayout";
 import { ReportPaper, reportOutline } from "../features/report/ReportPaper";
 import { feedLink, kindFromPath } from "../features/report/format";
 import type { Screen } from "../components/shell/screens";
+
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { project, reportDate } from "../features/research/data";
+import { dailyIndex, dailyPage, ResearchDaily } from "../features/research/ResearchDaily";
 
 export const handle: Screen = { tab: "daily", name: "日报" };
 export { pageHeaders as headers } from "../lib/api.server";
@@ -24,6 +28,16 @@ const PATTERN: Record<ReportKind, RegExp> = {
 export async function loader({ request, params }: Route.LoaderArgs) {
   const kind = kindFromPath(new URL(request.url).pathname);
   const key = params.key ?? "";
+  if (researchEnabled()) {
+    if (kind !== "daily") throw redirect("/daily", 308);
+    if (/^report-\d{4}-\d{2}-\d{2}$/.test(key)) throw redirect(`/daily/${key.slice(7)}`, 308);
+    if (!PATTERN.daily.test(key)) throw data({ message: "not_found" }, { status: 404 });
+    const dashboard = await loadResearch(request);
+    const index = dailyIndex(dashboard.reports);
+    const entry = dashboard.reports.find((report) => reportDate(report) === key);
+    if (!entry) throw data({ message: "not_found" }, { status: 404 });
+    return researchPage({ research: { data: project(dashboard, {}), index, report: dailyPage(dashboard, index, entry), asOf: entry.asOf } });
+  }
   if (!PATTERN[kind].test(key)) throw data({ message: "not_found" }, { status: 404 });
   const [report, { items: index }] = await Promise.all([
     loadOr404<ReportDetail>(`/api/site/reports/${kind}/${key}`, { signal: request.signal }),
@@ -33,6 +47,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) {
+    const report = loaderData.research.report;
+    return [...pageMeta({ title: report?.title ?? "日报", path: report ? `/daily/${report.key}` : "/daily" }), feedLink("daily")];
+  }
   if (!loaderData) return [{ title: titled("报告不存在") }, { name: "robots", content: "noindex" }];
   const r = loaderData.report;
   const description = reportDescription(r) ?? `${SITE.name} ${r.key} ${subjectAfter("的", REPORT_NAMES[r.kind])}。`;
@@ -48,7 +66,9 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function ReportDetailPage() {
-  const { report, index, today } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchDaily {...result.research} />;
+  const { report, index, today } = result;
   return (
     <ReportLayout kind={report.kind} index={index} current={report.key} today={today} outline={reportOutline(report)}>
       <ReportPaper report={report} index={index} />

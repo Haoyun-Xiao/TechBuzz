@@ -63,7 +63,10 @@ const ENGINE_SCHEDULES: Scheduled[] = [
 ];
 
 export async function registerSchedules(boss: PgBoss) {
-  const schedules = [...ENGINE_SCHEDULES, ...serverModules().flatMap((m) => m.schedules ?? [])].filter((s) => s.when?.() ?? true);
+  // The research worker publishes the single daily edition. The board ranks current
+  // activities directly, so its 48-hour window needs no legacy ranking snapshot.
+  const replaced = process.env.TECHBUZZ_RESEARCH_URL ? ["reports.compose", "hot.rank", "hot.snapshot"] : [];
+  const schedules = [...ENGINE_SCHEDULES, ...serverModules().flatMap((m) => m.schedules ?? [])].filter((s) => !replaced.includes(s.name) && (s.when?.() ?? true));
   for (const s of schedules) {
     const queue = `cron.${s.name}`;
     await ensureQueue(queue, { policy: "singleton", retryLimit: 1, expireInSeconds: 3600 });

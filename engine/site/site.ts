@@ -154,10 +154,10 @@ export const ABOUT = {
   sourcesFallback: "八",
   /** 信源河动画下面的四个环节。 */
   steps: {
-    collect: "每 5 分钟检查八个 X 账号的新帖子与回复。",
-    store: "抓到的都存下来，同一件事的报道归到一起，热点榜就是从这里算出来的。",
-    select: `模型先筛选与科技股研究相关的材料，独立评分两次，再写中文标题、摘要和${ITEM_COPY.reasonLabel}。`,
-    publish: `${EDITION_WHEN.daily} 出日报，${EDITION_WHEN.weekly} 出周报，${EDITION_WHEN.monthly} 出月报。`,
+    collect: "每五分钟检查八个 X 账号的原创、回复、引用和转发。",
+    store: "全部动态记录各账号的活动。热点榜汇总近 48 小时的多账号关注事件和单源高分信号。",
+    select: `按投资影响 35 分、信息增量 25 分、可验证性 25 分、持续跟踪价值 15 分评分。默认 70 分进入精选和 Idea 候选。`,
+    publish: `${EDITION_WHEN.daily} 后汇总北京时间前一自然日的市场变化、Idea 和趋势。`,
   },
   /**
    * 作者块（选填），null 就不显示。

@@ -10,7 +10,7 @@ import { createRequestListener } from "@react-router/node";
 import type { ServerBuild } from "react-router";
 import { isApiOwned, isPrivatePage, resolveRedirect } from "@techbuzz/contracts/http-policy";
 import { BROWSER_MAX_SECONDS } from "./app/lib/api.server.ts";
-import { proxyToApi } from "./app/lib/api-proxy.server.ts";
+import { proxyResearch, proxyToApi } from "./app/lib/api-proxy.server.ts";
 import { logError } from "./app/lib/errors.server.ts";
 
 const PORT = Number(process.env.WEB_PORT || 3000);
@@ -143,13 +143,7 @@ async function handle(req: import("node:http").IncomingMessage, res: import("nod
   const pathname = qi >= 0 ? raw.slice(0, qi) : raw;
   const search = qi >= 0 ? raw.slice(qi) : "";
 
-  // Research pages use the same React shell as the feed. Only the JSON API lives in the research service.
-  const research = process.env.TECHBUZZ_RESEARCH_URL;
-  const apiPath = pathname.startsWith("/research/api/") ? pathname.slice("/research".length) : pathname;
-  if (research && /^\/api\/(?:dashboard|admin\/threshold|(?:sources|posts|ideas|trends|reports)(?:\/[^/]+)?)$/.test(apiPath)) {
-    req.url = apiPath + search;
-    return proxyToApi(req, res, {}, new URL(research));
-  }
+  if (proxyResearch(req, res, pathname, search)) return;
 
   const decision = resolveRedirect(pathname, search);
   if (decision) {

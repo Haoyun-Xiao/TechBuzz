@@ -30,12 +30,14 @@ const BATCH_CHARS = 3500;
 /** Longer bodies (as sent to the model) get their first part translated and are marked incomplete. */
 const MAX_CHARS = 60_000;
 /** X posts shorter than this carry their meaning in the Chinese title and summary. */
-const X_MIN_CHARS = 60;
+const researchBoard = Boolean(process.env.TECHBUZZ_RESEARCH_URL);
+const X_MIN_CHARS = researchBoard ? 1 : 60;
+const researchPost = sql`${researchBoard} AND s.kind = 'x_search' AND a.x_post IS NOT NULL AND NOT coalesce(p.suppress_original,false)`;
 
 const PUBLIC_TRANSLATION = sql`p.visibility = 'public' AND s.participation_mode = 'editorial' AND NOT p.suppress_original`;
 // A saved X Article still follows the full-text rule, even if its surrounding X post is visible.
-const BODY_TRANSLATION = sql`${PUBLIC_TRANSLATION}
-  AND ((p.selected AND p.body_mode = 'full') OR (${SHOWN_POST} AND a.x_article IS NULL))`;
+const BODY_TRANSLATION = sql`((${researchPost}) OR (${PUBLIC_TRANSLATION}
+  AND ((p.selected AND p.body_mode = 'full') OR (${SHOWN_POST} AND a.x_article IS NULL))))`;
 
 const BLOCK = new Set(["p", "h2", "h3", "h4", "h5", "li", "blockquote", "figcaption", "td", "th", "dt", "dd", "caption"]);
 const CONTAINER = /^(p|h[2-5]|li|blockquote|figcaption|td|th|dt|dd|caption|ul|ol|table|pre|figure|div)$/;
@@ -203,9 +205,9 @@ async function suppressFromTranslation(articleId: string, revision: number, rece
 
 export async function translateArticle(articleId: string, expectedRevision?: number): Promise<TranslateResult> {
   const [row] = await sql<{ revision: number; channel: string; language: string | null; body_html: string | null; body_text: string | null; x_post: { text?: string } | null; x_article: { title?: string; text?: string; html?: string } | null; title: string }[]>`
-    SELECT a.revision, p.channel, a.language, a.body_html, a.body_text, a.x_post, a.x_article, p.title
-    FROM publications p JOIN articles a ON a.id = p.article_id JOIN sources s ON s.id = p.source_id
-    WHERE p.article_id = ${articleId} AND ${BODY_TRANSLATION}
+    SELECT a.revision, coalesce(p.channel,'x') AS channel, a.language, a.body_html, a.body_text, a.x_post, a.x_article, coalesce(p.title,a.title) AS title
+    FROM articles a JOIN sources s ON s.id = a.source_id LEFT JOIN publications p ON p.article_id = a.id
+    WHERE a.id = ${articleId} AND ${BODY_TRANSLATION}
       AND (${expectedRevision ?? null}::int IS NULL OR a.revision = ${expectedRevision ?? null})`;
   if (!row) return { articleId, revision: expectedRevision, status: "skipped", reason: "no translatable public body at the requested revision" };
   const result = (r: Omit<TranslateResult, "articleId" | "revision">): TranslateResult => ({ articleId, revision: row.revision, ...r });
@@ -220,6 +222,8 @@ export async function translateArticle(articleId: string, expectedRevision?: num
   // article's body is: the post's own words and the article as laid out (xArticleBody), never the post's
   // introduction alone, which would stand in for the whole article.
   const article = row.channel === "x" && (row.x_article?.text || row.x_article?.html) ? row.x_article : null;
+  const textOnlyArticle = !!article && !article.html;
+  if (textOnlyArticle && researchBoard && article?.text) article.html = textToHtml(article.text);
   if (article && !article.html) return result({ status: "skipped", reason: "saved long article without its layout" });
   if (row.channel === "x" && !article) {
     const text = String(row.x_post?.text ?? row.body_text ?? "").trim();
@@ -328,7 +332,7 @@ export async function translateArticle(articleId: string, expectedRevision?: num
     }
   }
   await store(articleId, row.revision, row.title, html, translatedText, complete, receiptIds,
-    { html: source, xArticle: !!article });
+    textOnlyArticle ? undefined : { html: source, xArticle: !!article });
   return result({ status: complete ? "translated" : "partial", segments: done });
 }
 
@@ -493,20 +497,20 @@ export async function translateQuotes(opts: { days?: number; limit?: number; bud
 export async function translatePending(opts: { limit?: number; budgetMs?: number } = {}): Promise<{ done: TranslateResult[]; quotes: number }> {
   const started = Date.now();
   const pending = await sql<{ article_id: string; revision: number; language: string | null; text: string | null }[]>`
-    SELECT p.article_id,a.revision,a.language,
-      CASE WHEN p.channel='x' THEN coalesce(nullif(a.x_article->>'text',''),a.x_post->>'text',a.body_text) ELSE a.body_text END AS text
-    FROM publications p JOIN articles a ON a.id = p.article_id JOIN sources s ON s.id = p.source_id
-    LEFT JOIN translations tr ON tr.article_id = p.article_id AND tr.lang = 'zh'
+    SELECT a.id AS article_id,a.revision,a.language,
+      CASE WHEN p.channel='x' OR s.kind='x_search' THEN coalesce(nullif(a.x_article->>'text',''),a.x_post->>'text',a.body_text) ELSE a.body_text END AS text
+    FROM articles a JOIN sources s ON s.id = a.source_id LEFT JOIN publications p ON p.article_id = a.id
+    LEFT JOIN translations tr ON tr.article_id = a.id AND tr.lang = 'zh'
     WHERE ${BODY_TRANSLATION}
-      AND (p.channel='x' OR a.body_html IS NOT NULL)
-      AND (p.discovered_at > now() - interval '3 days'
+      AND (p.channel='x' OR s.kind='x_search' OR a.body_html IS NOT NULL)
+      AND (a.discovered_at > now() - make_interval(days => ${researchBoard ? 30 : 3})
            OR EXISTS (SELECT 1 FROM article_revisions r WHERE r.article_id = a.id AND r.revision = a.revision AND r.revision > 1
                       AND r.created_at > now() - interval '3 days'))
       AND (tr.article_id IS NULL OR (tr.origin <> 'source' AND tr.revision < a.revision))
-      AND NOT EXISTS (SELECT 1 FROM translation_attempts t WHERE t.article_id = p.article_id AND t.revision = a.revision
+      AND NOT EXISTS (SELECT 1 FROM translation_attempts t WHERE t.article_id = a.id AND t.revision = a.revision
                       AND (t.outcome IN ('translated', 'partial') OR t.attempts >= 3
-                        OR (t.outcome='skipped' AND t.reason NOT IN ('already Chinese','no foreign-language body'))))
-    ORDER BY p.discovered_at DESC`;
+                        OR (t.outcome='skipped' AND t.reason NOT IN ('already Chinese','no foreign-language body') AND NOT (${researchBoard} AND t.reason IN ('short post','saved long article without its layout')))))
+    ORDER BY a.discovered_at DESC`;
   // Reconsider language skips with the shared rule. Filter before taking the batch so Chinese
   // originals do not occupy every slot and starve foreign-language bodies behind them.
   const rows = pending.filter(row => !isChineseText(row.text ?? "", row.language)).slice(0, opts.limit ?? 30);

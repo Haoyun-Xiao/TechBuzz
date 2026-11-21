@@ -91,14 +91,14 @@ function stagesOf(stats: SiteStats | null): Stage[] {
       title: "收录",
       figure: stats && <Figure n={stats.items} unit="条动态" />,
       text: ABOUT.steps.store,
-      note: stats && <>过去 24 小时收进 {stats.day.collected.toLocaleString("en-US")} 条</>,
+      note: stats && <>近 24 小时有 {stats.day.collected.toLocaleString("en-US")} 条</>,
     },
     {
       no: "03",
       title: "精选",
       figure: stats && <Figure n={stats.selected} unit={REPORTS.metricUnits.selectedCount} />,
       text: ABOUT.steps.select,
-      note: stats && <>过去 24 小时 {stats.day.selected} 条进了精选</>,
+      note: stats && <>过去 24 小时 {stats.day.selected} 条精选动态</>,
     },
     {
       no: "04",
@@ -169,7 +169,7 @@ function Maker({ maker, contact }: { maker: NonNullable<typeof ABOUT.maker>; con
 function Latest({ item, className = "" }: { item: SiteStats["latest"][number] | undefined; className?: string }) {
   if (!item) return null;
   return (
-    <IntentLink viewTransition to={`/items/${item.id}`} className={`group block ${className}`}>
+    <IntentLink viewTransition to={item.href ?? `/items/${item.id}`} className={`group block ${className}`}>
       <span className="text-[11px] font-semibold tracking-[0.2em] text-accent">最近精选</span>
       <span key={item.id} className="animate-fade-up mt-1.5 block">
         <span className="line-clamp-2 text-[13.5px] font-semibold leading-[1.55] text-ink transition-colors group-hover:text-accent">{item.title}</span>

@@ -1,4 +1,3 @@
-import { Research } from "../features/research/Research";
 import { useEffect } from "react";
 import { Link, redirect, useLoaderData, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/all";
@@ -18,6 +17,9 @@ import { isPhone, type Screen } from "../components/shell/screens";
 import { openSearch } from "../features/search/SearchOverlay";
 import { addRecentSearch } from "../lib/local-state";
 
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { feedPage, ResearchFeed } from "../features/research/ResearchFeed";
+
 export const handle: Screen = { tab: "featured", name: "全部" };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
@@ -26,6 +28,7 @@ const ALL_TITLE = subjectAfter("全部", "动态");
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
+  if (researchEnabled()) return researchPage({ research: feedPage(await loadResearch(request), url.searchParams) });
   const q = url.searchParams.get("q")?.trim().slice(0, 200) || null;
   const tab = url.searchParams.get("tab") === "relevance" ? "relevance" : null;
   // Older deep-paging parameters (deep, anchorAt) still open a normal page.
@@ -37,10 +40,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
   // Past the last page of what there is: the last page, with the same search and filters.
   if (data.total > 0 && data.page > data.pageCount) throw redirect(pageHref(url.searchParams, data.pageCount));
-  return cachedPage(60, { researchEnabled: !!process.env.TECHBUZZ_RESEARCH_URL, data });
+  return cachedPage(60, { data });
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) return pageMeta({ title: "全部动态", path: "/all" });
   const f = loaderData?.data.filters;
   const q = f?.q;
   const page = loaderData?.data.page ?? 1;
@@ -71,7 +75,12 @@ function pageHref(params: URLSearchParams, page: number) {
 }
 
 export default function AllPage() {
-  const { researchEnabled, data } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchFeed feed={result.research} />;
+  return <StandaloneAll {...result} />;
+}
+
+function StandaloneAll({ data }: Pick<Exclude<Awaited<ReturnType<typeof useLoaderData<typeof loader>>>, { research: unknown }>, "data">) {
   const [params] = useSearchParams();
   const navigation = useNavigation();
   const f = data.filters;
@@ -138,7 +147,6 @@ export default function AllPage() {
         </div>
       )}
 
-      {researchEnabled && data.page === 1 && !hasFeedFilters(f) && <details open className="mb-6"><summary className="cursor-pointer text-[17px] font-semibold text-ink">八账号研究动态</summary><Research initial="feed" embedded /></details>}
       <div className={`transition-opacity duration-200 ${busy ? "opacity-50" : ""}`}>
         {data.items.length === 0 ? (
           <div className="mt-2 lg:card">

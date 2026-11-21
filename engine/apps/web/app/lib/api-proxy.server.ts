@@ -31,3 +31,13 @@ export function proxyToApi(req: IncomingMessage, res: ServerResponse, set: Outgo
   });
   req.pipe(upstream);
 }
+
+/** Compatibility for existing research links in browsers and scripts. Site loaders use the native API. */
+export function proxyResearch(req: IncomingMessage, res: ServerResponse, pathname: string, search: string): boolean {
+  const service = process.env.TECHBUZZ_RESEARCH_URL;
+  const apiPath = pathname.startsWith("/research/api/") ? pathname.slice("/research".length) : pathname;
+  if (!service || !/^\/api\/(?:dashboard|admin\/threshold|(?:sources|posts|ideas|trends|reports)(?:\/[^/]+)?)$/.test(apiPath)) return false;
+  req.url = apiPath + search;
+  proxyToApi(req, res, {}, new URL(service));
+  return true;
+}

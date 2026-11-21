@@ -126,16 +126,16 @@ export class QueryError extends Error {}
  * Strict query parsing for public APIs: only declared parameters, each at most once.
  * Unknown parameters (including cache busters like `_`) and duplicates are 400.
  */
-export function strictQuery(req: FastifyRequest, allowed: readonly string[]): Record<string, string> {
+export function strictQuery(req: FastifyRequest, allowed: readonly string[], repeated: readonly string[] = []): Record<string, string> {
   const raw = req.raw.url ?? "";
   const qIndex = raw.indexOf("?");
   const params = new URLSearchParams(qIndex >= 0 ? raw.slice(qIndex + 1) : "");
   const out: Record<string, string> = {};
   for (const [key, value] of params) {
     if (!allowed.includes(key)) throw new QueryError(`Unknown query parameter: ${key}.`);
-    if (key in out) throw new QueryError(`Query parameter must not be repeated: ${key}.`);
+    if (key in out && !repeated.includes(key)) throw new QueryError(`Query parameter must not be repeated: ${key}.`);
     if (value.includes("\0")) throw new QueryError("Query parameters must not contain NUL.");
-    out[key] = value;
+    out[key] = key in out ? `${out[key]},${value}` : value;
   }
   return out;
 }

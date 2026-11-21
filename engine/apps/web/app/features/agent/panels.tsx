@@ -5,9 +5,10 @@ import { Fragment, useState } from "react";
 import { Link } from "react-router";
 import { PUBLIC_INTERFACE_VERSION } from "@techbuzz/contracts/http-policy";
 import { MCP_TOOL_NAMES as T, MCP_TOOLS } from "@techbuzz/contracts/mcp";
-import { feedCategoryLabel, PUBLIC_API_CATEGORY_KEYS } from "@techbuzz/contracts/taxonomy";
+import { CATEGORY_LABELS, feedCategoryLabel, PUBLIC_API_CATEGORY_KEYS } from "@techbuzz/contracts/taxonomy";
 import { ACCESS, AGENT, EDITION_WHEN, POLICY, REPORTS, SITE, subjectAfter, withSubject } from "@techbuzz/site";
 import { CodeBlock, CopyButton } from "./CodeBlock";
+import { useResearchMode } from "../../components/shell/nav";
 import { PillTabs } from "../../components/ui/Tabs";
 import type { AgentPanelProps } from "../../modules";
 import { AGENT_PARTS, GUIDE_CLIENTS, TAG } from "./module-parts";
@@ -32,6 +33,7 @@ const MCP_CLIENTS = [
 ] as const;
 
 export function McpPanel(props: AgentPanelProps) {
+  const research = useResearchMode();
   const url = addressOf(props, "/api/mcp");
   const name = SITE.mcpPrefix;
   const [client, setClient] = useState<string>("claude");
@@ -58,7 +60,7 @@ export function McpPanel(props: AgentPanelProps) {
         </Step>
       </Steps>
 
-      <Block title={`${mcpToolCount()} 个工具`}>
+      <Block title={research ? "研究工具" : `${mcpToolCount()} 个工具`}>
         <Table
           head={["工具", "能做什么", "可以这样问"]}
           minWidth={600}
@@ -68,8 +70,10 @@ export function McpPanel(props: AgentPanelProps) {
             [<Mono>{T.hot}</Mono>, "当前热点榜 Top 10", "现在最热的是什么？"],
             [<Mono>{T.story}</Mono>, "一个热点事件的时间线和持续更新的综述", "这件事的来龙去脉？"],
             [<Mono>{T.daily}</Mono>, subjectAfter("最新或指定日期的", "日报"), "给我今天的日报。"],
+            ...(!research ? [
             [<Mono>{T.weekly}</Mono>, subjectAfter("最新或指定一周的", "周报"), `${subjectAfter("这周", "圈")}有哪些大事？`],
             [<Mono>{T.monthly}</Mono>, subjectAfter("最新或指定月份的", "月报"), `${subjectAfter("上个月", "圈")}发生了什么？`],
+            ] : []),
             [<Mono>{T.research}</Mono>, "读取研究 Idea、趋势时间线和研究日报", "最新的研究假设有哪些，依据是什么？"],
             ...AGENT_PARTS.flatMap((a) => a.tools ?? []).map((t) => [<Mono>{t.name}</Mono>, t.does, t.ask]),
           ]}
@@ -119,6 +123,12 @@ const FEED_CATEGORIES = PUBLIC_API_CATEGORY_KEYS.map((key) => [key, feedCategory
 
 export function RssPanel(props: AgentPanelProps) {
   const { base } = props;
+  const research = useResearchMode();
+  const feeds = research ? FEEDS.slice(0, 4).map((feed) => {
+    if (feed.path === "/feed/all.xml") return { ...feed, desc: "全部动态。按已知活动时间排列，保留原帖和传播账号。" };
+    if (feed.path === "/feed/daily.xml") return { ...feed, name: "日报", desc: "研究日报，含摘要、研究要点和原帖证据。" };
+    return feed;
+  }).concat({ name: "热点榜", path: "/feed/hot.xml", desc: "近 48 小时的多源热点与单源高分条目。" }) : FEEDS;
   const lead = `${["兼容主流 RSS 2.0 阅读器，也能接 n8n、Zapier 这类自动化工具。地址长期不变", ...AGENT_PARTS.flatMap((a) => a.rssLead ?? [])].join("；")}。`;
   return (
     <>
@@ -126,7 +136,7 @@ export function RssPanel(props: AgentPanelProps) {
         {lead}
       </PanelHead>
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {FEEDS.map((f) => (
+        {feeds.map((f) => (
           <div key={f.path} className="card flex flex-col p-4">
             <div className="flex items-center gap-2">
               <span className="text-[15px] font-semibold text-ink">{f.name}</span>
@@ -147,7 +157,7 @@ export function RssPanel(props: AgentPanelProps) {
           head={["分类", "摘要", "全文"]}
           minWidth={420}
           rows={FEED_CATEGORIES.map(([slug, label]) => [
-            <span className="font-medium text-ink">{label}</span>,
+            <span className="font-medium text-ink">{research ? CATEGORY_LABELS[slug] : label}</span>,
             <span className="inline-flex items-center gap-2"><Mono>{`/feed/category/${slug}.xml`}</Mono><CopyButton text={addressOf(props, `/feed/category/${slug}.xml`)} className="!h-6 !px-1.5" /></span>,
             <span className="inline-flex items-center gap-2"><Mono>{`/feed/full/category/${slug}.xml`}</Mono><CopyButton text={addressOf(props, `/feed/full/category/${slug}.xml`)} className="!h-6 !px-1.5" /></span>,
           ])}
@@ -169,9 +179,10 @@ const RECIPES = [
 
 export function ApiPanel(props: AgentPanelProps) {
   const { base, tag } = props;
+  const research = useResearchMode();
   const userAgent = [ACCESS.userAgent, TAG && tag ? TAG.userAgent(tag) : null].filter(Boolean).join(" ");
   const curl = `curl --compressed${userAgent ? ` -A '${userAgent}'` : ""}`;
-  let pace = `内容多久变一次：新资讯全天陆续进来，精选每天变几次到几十次，日报${EDITION_WHEN.daily}、周报${EDITION_WHEN.weekly}、月报${EDITION_WHEN.monthly}（北京时间）各一期。`;
+  let pace = research ? "精选、全部动态和热点随公开数据更新。日报发布后可按日期读取。" : `内容多久变一次：新资讯全天陆续进来，精选每天变几次到几十次，日报${EDITION_WHEN.daily}、周报${EDITION_WHEN.weekly}、月报${EDITION_WHEN.monthly}（北京时间）各一期。`;
   if (ACCESS.ratePerMinute) pace += `同一个 IP 每分钟超过约 ${ACCESS.ratePerMinute} 次会收到 429，请按 Retry-After 等待，不要并发重试。`;
   const [recipe, setRecipe] = useState<string>("latest");
   const recipes = AGENT_PARTS.flatMap((a) => a.recipes ?? []);
@@ -185,7 +196,7 @@ export function ApiPanel(props: AgentPanelProps) {
 
       <Block title="按分类筛选">
         <p>在资讯请求中加上 <Mono>category</Mono>，只取对应分类；不传则包含全部分类。返回条目的 <Mono>category</Mono> 也使用下表中的值。</p>
-        <Table head={["分类", "请求参数"]} rows={FEED_CATEGORIES.map(([key, name]) => [name, <Mono>{`category=${key}`}</Mono>])} />
+        <Table head={["分类", "请求参数"]} rows={FEED_CATEGORIES.map(([key, name]) => [research ? CATEGORY_LABELS[key] : name, <Mono>{`category=${key}`}</Mono>])} />
       </Block>
 
       <Block title="用得省，也更快">
@@ -193,7 +204,7 @@ export function ApiPanel(props: AgentPanelProps) {
           items={[
             { title: "开压缩", text: <>curl 加 <Mono>--compressed</Mono>，其他客户端打开 gzip 或 br。JSON 压缩后只有原来的 1/4 到 1/8。</> },
             { title: "带上 ETag", text: <>保存响应里的 ETag，下次带 <Mono>If-None-Match</Mono>；内容没变时返回 304，不传正文。</> },
-            { title: "按节奏取", text: `资讯和热点最快一分钟一次；日报${EDITION_WHEN.daily} 后取一次，周报、月报出刊后取一次；往回翻页翻到已有的那条就停。` },
+            { title: "按节奏取", text: research ? "按需要读取资讯、热点，按日期读取日报。" : `资讯和热点最快一分钟一次；日报${EDITION_WHEN.daily} 后取一次，周报、月报出刊后取一次；往回翻页翻到已有的那条就停。` },
           ]}
         />
         <p className="mt-3 text-[13px] leading-[1.75] text-ink-3">{pace}</p>
@@ -205,14 +216,15 @@ export function ApiPanel(props: AgentPanelProps) {
           minWidth={640}
           rows={[
             { group: "资讯" },
-            [<Mono>/api/v1/items</Mono>, "精选或最近 7 天全部动态，可按分类、时间窗、关键词筛", "最快 1 分钟一次"],
+            [<Mono>/api/v1/items</Mono>, research ? "精选或全部动态，支持类别、活动类型、账号、时间窗与搜索" : "精选或最近 7 天全部动态，可按分类、时间窗、关键词筛", "最快 1 分钟一次"],
             { group: "热点与事件" },
-            [<Mono>/api/v1/hot-topics</Mono>, "当前热点榜 Top 10", "最快 1 分钟一次"],
-            [<Mono>{"/api/v1/stories/{publicId}"}</Mono>, "一个事件的报道时间线、AI 综述和关联事件", "需要时"],
+            [<Mono>/api/v1/hot-topics</Mono>, research ? "多源热点与单源高分" : "当前热点榜 Top 10", "最快 1 分钟一次"],
+            [<Mono>{"/api/v1/stories/{publicId}"}</Mono>, research ? "一个热点的传播账号和原帖证据" : "一个事件的报道时间线、AI 综述和关联事件", "需要时"],
             { group: "日报" },
-            [<Mono>/api/v1/dailies/latest</Mono>, "最新一期日报", `${EDITION_WHEN.daily} 后一次`],
+            [<Mono>/api/v1/dailies/latest</Mono>, "最新一期日报", research ? "发布后读取" : `${EDITION_WHEN.daily} 后一次`],
             [<Mono>{"/api/v1/dailies/{date}"}</Mono>, "指定日期日报；撤稿会移除引用", "缓存过期后使用前验证 ETag"],
             [<Mono>/api/v1/dailies</Mono>, "日报日期索引", "每天一次"],
+            ...(!research ? [
             { group: "周报与月报" },
             [<Mono>/api/v1/weeklies/latest</Mono>, "最新一期周报：头条、总述和一周重点，按栏目分好", `${EDITION_WHEN.weekly} 后一次`],
             [<Mono>{"/api/v1/weeklies/{week}"}</Mono>, "指定一周，ISO 周如 2026-W39；撤稿会移除引用", "缓存过期后使用前验证 ETag"],
@@ -220,6 +232,7 @@ export function ApiPanel(props: AgentPanelProps) {
             [<Mono>/api/v1/monthlies/latest</Mono>, "最新一期月报", `${EDITION_WHEN.monthly} 后一次`],
             [<Mono>{"/api/v1/monthlies/{month}"}</Mono>, "指定月份，如 2026-09", "缓存过期后使用前验证 ETag"],
             [<Mono>/api/v1/monthlies</Mono>, "月报索引", "每月一次"],
+            ] : []),
             ...AGENT_PARTS.flatMap((a) => (a.api ? [{ group: a.api.group }, ...a.api.rows.map(([path, does, often]) => [<Mono>{path}</Mono>, does, often])] : [])),
             { group: "给 AI 助手" },
             [<Mono>/api/v1/agent</Mono>, `给 Agent 的使用说明，列出的地址返回整理好的中文 Markdown${GUIDE_CLIENTS ? `；${GUIDE_CLIENTS} 用的就是它们` : ""}`, "需要时"],

@@ -1,6 +1,8 @@
 // PostgreSQL is the source of research material. SQLite keeps a local view for the
 // existing research jobs and dashboard, along with their scores and receipts.
-import { handles, ingestPosts, posts } from './collector.mjs';
+import { handles, ingestPosts } from './collector.mjs';
+
+import { activityView } from './activity.mjs';
 
 const sourceHandles = new Map(handles.map(handle => [`x-${handle.toLowerCase()}`, handle]));
 export const sourceIds = [...sourceHandles.keys()];
@@ -21,7 +23,7 @@ function nativeReference(native, verified) {
   return current?.id === verified?.id && current?.text == null ? verified : current;
 }
 
-function fromMaterial(row) {
+function fromMaterial(row, vocabulary) {
   const post = row.x_post;
   const verified = row.verified;
   // A rediscovered sample keeps richer verified context when the search response is partial.
@@ -34,6 +36,10 @@ function fromMaterial(row) {
   const text = native ? repostOf ? '' : post.text : verified.text;
   return {
     ...verified,
+    nativeCompanies: [...new Set([...(row.native_subjects ?? []).map(id=>vocabulary.entities?.[id]?.name).filter(Boolean),
+      ...(row.native_tags ?? []).filter(tag=>vocabulary.companyTags?.includes(tag))])],
+    nativeTopics: (row.native_tags ?? []).filter(tag=>vocabulary.topicTags?.includes(tag)),
+    nativeCategory: row.native_category ?? null, factId: row.fact_id == null ? null : String(row.fact_id),
     nativeArticleId: row.native_id ?? null, textZh: row.text_zh ?? null, quotedTextZh: row.quoted_zh ?? null,
     id: post.tweetId, handle: sourceHandles.get(row.source_id), url: row.url,
     publishedAt: row.published_at.toISOString(), collectedAt: row.discovered_at.toISOString(),
@@ -46,19 +52,21 @@ function fromMaterial(row) {
   };
 }
 
-export async function syncResearch(db, sql) {
+export async function syncResearch(db, sql, vocabulary = {}) {
   const [materials, sources, activities] = await Promise.all([
     sql`
       SELECT a.source_id, a.url, a.published_at, a.discovered_at, a.x_post, a.x_article,
-             p.article_id AS native_id, tr.body_text AS text_zh, qt.text_zh AS quoted_zh,
+             a.id AS native_id, p.tags AS native_tags, an.subjects AS native_subjects, p.category AS native_category, p.fact_id AS fact_id, tr.body_text AS text_zh, qt.text_zh AS quoted_zh,
              a.raw->'techbuzzSample' AS verified,
              EXISTS (SELECT 1 FROM article_discoveries d
                      WHERE d.article_id = a.id AND d.source_id = a.source_id AND d.via = 'fetch') AS fetched
       FROM articles a JOIN sources s ON s.id = a.source_id
       LEFT JOIN publications p ON p.article_id = a.id AND p.visibility = 'public'
-        AND s.participation_mode = 'editorial' AND (NOT p.selected OR p.visible_after <= now()) AND NOT p.suppress_original
-      LEFT JOIN translations tr ON tr.article_id = p.article_id AND tr.lang = 'zh' AND tr.revision >= a.revision AND tr.complete
-      LEFT JOIN quote_translations qt ON p.channel = 'x' AND qt.tweet_id = substring(a.x_post->'quoted'->>'url' from '/status/([0-9]+)')
+
+      LEFT JOIN analyses an ON an.id = p.analysis_id
+      LEFT JOIN translations tr ON tr.article_id = a.id AND tr.lang = 'zh' AND tr.revision >= a.revision AND tr.complete
+      LEFT JOIN quote_translations qt ON qt.tweet_id = substring(a.x_post->'quoted'->>'url' from '/status/([0-9]+)')
+        AND qt.text_hash = encode(sha256(convert_to(a.x_post->'quoted'->>'text','UTF8')),'hex')
       WHERE s.kind = 'x_search' AND s.id IN ${sql(sourceIds)} AND a.published_at IS NOT NULL
         AND a.x_post IS NOT NULL
     `,
@@ -69,15 +77,15 @@ export async function syncResearch(db, sql) {
       ) run ON true WHERE s.kind = 'x_search' AND s.id IN ${sql(sourceIds)}
     `,
     sql`
-      SELECT source_id, tweet_id, kind, author, url, published_at, first_seen_at, last_seen_at, body
-      FROM x_account_activity WHERE source_id IN ${sql(sourceIds)} AND kind = 'repost'
+      SELECT source_id, tweet_id, kind, author, url, published_at, first_seen_at, last_seen_at, body, observed_at
+      FROM x_account_activity WHERE source_id IN ${sql(sourceIds)}
     `,
   ]);
   // The research cache is only replaced after a successful read of the full source set.
   if (sources.length !== sourceIds.length) throw new Error('The eight engine X sources are not seeded');
   // Search results must not attribute a third-party original to the monitored account.
   const projected = materials.filter(row => typeof row.x_post.handle === 'string' &&
-    row.x_post.handle.replace(/^@/, '').toLowerCase() === sourceHandles.get(row.source_id)?.toLowerCase()).map(fromMaterial);
+    row.x_post.handle.replace(/^@/, '').toLowerCase() === sourceHandles.get(row.source_id)?.toLowerCase()).map(row=>fromMaterial(row,vocabulary));
   const present = new Set(projected.map(post => post.id));
   const remove = db.prepare('DELETE FROM x_posts WHERE id = ?');
   const writeSource = db.prepare(`
@@ -88,12 +96,12 @@ export async function syncResearch(db, sql) {
   try {
     db.exec('DELETE FROM x_activity');
     const writeActivity = db.prepare(`INSERT INTO x_activity
-      (source_id, tweet_id, kind, author, url, published_at, first_seen_at, last_seen_at, body)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      (source_id, tweet_id, kind, author, url, published_at, first_seen_at, last_seen_at, body, observed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const activity of activities) {
       writeActivity.run(activity.source_id, activity.tweet_id, activity.kind, activity.author,
         activity.url, activity.published_at?.toISOString() ?? null,
-        activity.first_seen_at.toISOString(), activity.last_seen_at.toISOString(), activity.body);
+        activity.first_seen_at.toISOString(), activity.last_seen_at.toISOString(), activity.body, activity.observed_at?.toISOString() ?? null);
     }
     for (const row of db.prepare('SELECT id FROM x_posts').all()) {
       if (!present.has(row.id)) remove.run(row.id);
@@ -126,5 +134,5 @@ export async function syncResearch(db, sql) {
     db.exec('ROLLBACK');
     throw error;
   }
-  return posts(db);
+  return activityView(db).posts;
 }

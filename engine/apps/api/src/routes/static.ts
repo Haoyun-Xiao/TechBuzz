@@ -11,6 +11,8 @@ import { REPO_ROOT, config } from "@techbuzz/backend/config";
 import { applyPublicHeaders, etagMatches, sendTextWithEtag } from "../http/respond.ts";
 import { loadSitemap } from "@techbuzz/backend/publication/sitemap";
 import { llmsTxt, loadLlmsAvailability } from "@techbuzz/backend/publication/llms";
+import { researchDiscovery, researchOpenApi } from "@techbuzz/backend/publication/research-discovery";
+import { researchPublication } from "@techbuzz/backend/publication/research";
 import { loadContact } from "@techbuzz/backend/site/contact";
 
 const PUBLIC = path.join(REPO_ROOT, "site/public");
@@ -123,7 +125,7 @@ export function registerStatic(app: FastifyInstance) {
   app.get<{ Params: { file: string } }>("/sitemaps/:file", (req, reply) => sendSitemap(req, reply, req.params.file));
 
   app.get("/llms.txt", async (req, reply) => {
-    const text = llmsTxt(await loadLlmsAvailability());
+    const text = researchPublication() ? researchDiscovery() : llmsTxt(await loadLlmsAvailability());
     applyPublicHeaders(reply, { cors: false });
     // Cached like /openapi-v1.json: a release that adds an ability is described everywhere within minutes.
     return sendTextWithEtag(req, reply, text, { etagPrefix: "llms", cacheControl: "public, max-age=300, must-revalidate", contentType: "text/plain; charset=utf-8" });
@@ -134,7 +136,14 @@ export function registerStatic(app: FastifyInstance) {
   app.get("/.well-known/security.txt", (req, reply) => sendFile(req, reply, path.join(PUBLIC, ".well-known/security.txt"), { cacheControl: "public, max-age=86400", fill: true }));
   // Cached as long as the icons it names: every page links it, so a day's lifetime was a request per reader a day.
   app.get("/manifest.webmanifest", (req, reply) => sendFile(req, reply, path.join(PUBLIC, "manifest.webmanifest"), { cacheControl: ICON_CACHE, fill: true }));
-  app.get("/openapi-v1.json", (req, reply) => sendFile(req, reply, path.join(PUBLIC, "openapi-v1.json"), { cacheControl: "public, max-age=300, must-revalidate", publicApi: true, fill: true }));
+  app.get("/openapi-v1.json", async (req, reply) => {
+    const file = path.join(PUBLIC, "openapi-v1.json");
+    const opts = { cacheControl: "public, max-age=300, must-revalidate", publicApi: true, fill: true };
+    if (!researchPublication()) return sendFile(req, reply, file, opts);
+    const base = await loadFile(file, true);
+    const body = Buffer.from(JSON.stringify(researchOpenApi(JSON.parse(base.body.toString("utf8")))));
+    return sendEntry(req, reply, { body, etag: etagOf(body) }, { ...opts, type: TYPES[".json"]! });
+  });
 
   // IndexNow proves the key by a file at the site root named after it (INDEXNOW_KEY).
   if (config.indexNowKey) {

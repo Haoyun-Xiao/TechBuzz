@@ -4,7 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { defineConfig, type Plugin } from "vite";
 import { isApiOwned, resolveRedirect } from "@techbuzz/contracts/http-policy";
 import { DEPLOYMENT } from "@techbuzz/site";
-import { proxyToApi } from "./app/lib/api-proxy.server.ts";
+import { proxyResearch, proxyToApi } from "./app/lib/api-proxy.server.ts";
 
 /** Development stand-in for the production web server: the shared redirect table and api-owned path routing. */
 function devEdge(): Plugin {
@@ -17,6 +17,7 @@ function devEdge(): Plugin {
         const pathname = qi >= 0 ? raw.slice(0, qi) : raw;
         const search = qi >= 0 ? raw.slice(qi) : "";
         if (pathname.startsWith("/@") || pathname.startsWith("/node_modules/") || pathname.startsWith("/app/") || pathname.startsWith("/__")) return next();
+        if (proxyResearch(req, res, pathname, search)) return;
         const decision = resolveRedirect(pathname, search);
         if (decision) {
           for (const [k, v] of Object.entries(decision.headers)) res.setHeader(k, v);

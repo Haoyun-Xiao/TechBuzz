@@ -13,5 +13,17 @@ export function openDatabase(path = process.env.TECHBUZZ_DB || '/data/techbuzz.s
     last_seen_at TEXT NOT NULL, body TEXT,
     PRIMARY KEY (source_id, tweet_id, kind)
   )`);
+  if (!db.prepare('PRAGMA table_info(x_activity)').all().some(column => column.name === 'observed_at')) {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (!db.prepare('PRAGMA table_info(x_activity)').all().some(column => column.name === 'observed_at')) {
+        db.exec('ALTER TABLE x_activity ADD COLUMN observed_at TEXT');
+      }
+      db.exec('COMMIT');
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
+  }
   return db;
 }

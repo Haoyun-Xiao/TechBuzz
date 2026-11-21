@@ -475,10 +475,18 @@ export async function holdAlert(key: string, reason: string, until: Date, actor:
   return held;
 }
 
+async function researchReportDates(): Promise<string[]> {
+  const { researchRequired } = await import("../publication/research.ts");
+  const index = await researchRequired<{items: {date:string}[]}>("/api/public/dailies", {limit:180});
+  return index.items.map(report => report.date).sort();
+}
+
 async function dailyReportFindings(now: number, open: AlertState): Promise<Finding[]> {
   if (!collecting() || !modelsOn()) return [];
   const today = beijingDate(now);
-  const [activity] = await sql<{ first_report: string | null; first_attempt: Date | null }[]>`
+  const research = Boolean(process.env.TECHBUZZ_RESEARCH_URL);
+  const archived = research ? await researchReportDates() : [];
+  const [activity] = research ? [{first_report:archived[0],first_attempt:null}] : await sql<{ first_report: string | null; first_attempt: Date | null }[]>`
     SELECT (SELECT min(key) FROM reports WHERE kind = 'daily') AS first_report,
            (SELECT min(started_at) FROM job_runs WHERE job = 'reports.compose') AS first_attempt`;
   const starts = [activity?.first_report, activity?.first_attempt && beijingDate(activity.first_attempt)]
@@ -487,18 +495,18 @@ async function dailyReportFindings(now: number, open: AlertState): Promise<Findi
   // New gaps and announced editions alike are followed for the scan window; settleDailies closes older ones.
   const from = dailyScanFrom(now);
   const dates = new Set(Object.keys(open).map(dailyDate).filter((date): date is string => !!date && date >= from));
-  for (let date = from; date <= today; date = addDays(date, 1)) {
+  for (let date = from; date <= (research ? addDays(today,-1) : today); date = addDays(date, 1)) {
     if (date >= start) dates.add(date);
   }
-  const overdue = [...dates].filter(date => now >= beijingAt(date, EDITION_TIMES.daily).getTime() + 2 * 3600_000).sort();
+  const overdue = [...dates].filter(date => now >= beijingAt(research ? addDays(date,1) : date, EDITION_TIMES.daily).getTime() + 2 * 3600_000).sort();
   if (!overdue.length) return [];
-  const published = new Set((await sql<{ key: string }[]>`SELECT key FROM reports WHERE kind = 'daily' AND key IN ${sql(overdue)}`).map(r => r.key));
+  const published = new Set(research ? archived : (await sql<{ key: string }[]>`SELECT key FROM reports WHERE kind = 'daily' AND key IN ${sql(overdue)}`).map(r => r.key));
   return overdue.filter(date => !published.has(date)).map(date => ({
     key: `${DAILY_PREFIX}${date}`, level: "now",
     title: `${date} 的日报还没生成`, impact: `读者看不到 ${date} 的日报`,
     heals: "尚未补齐；需查看运行记录确认是否需要人工补做",
     action: "把这条发给 AI 排查补跑",
-    detail: `reports daily ${date} 不存在；看 reports.compose 的运行记录`,
+    detail: research ? `核对 ${date} 的研究日报生成记录` : `reports daily ${date} 不存在；看 reports.compose 的运行记录`,
   }));
 }
 
@@ -512,7 +520,7 @@ async function settleDailies(open: AlertState, found: Set<string>, now: number):
   const sent: string[] = [];
   const dates = Object.keys(open).filter((key) => !found.has(key)).map(dailyDate).filter((date): date is string => !!date);
   if (!dates.length) return { missing, sent };
-  const published = new Set((await sql<{ key: string }[]>`SELECT key FROM reports WHERE kind = 'daily' AND key IN ${sql(dates)}`).map((r) => r.key));
+  const published = new Set(process.env.TECHBUZZ_RESEARCH_URL ? await researchReportDates() : (await sql<{ key: string }[]>`SELECT key FROM reports WHERE kind = 'daily' AND key IN ${sql(dates)}`).map((r) => r.key));
   for (const date of dates.filter((date) => !published.has(date))) {
     const key = `${DAILY_PREFIX}${date}`;
     if (date >= dailyScanFrom(now)) {

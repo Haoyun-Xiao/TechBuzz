@@ -27,6 +27,7 @@ import { EDITION, MOTTO, dateLine, dateMark, headline, metricItems, neighbourLab
 const pad = (n: number) => String(n).padStart(2, "0");
 const keyOf = (c: ReportCitation) => c.itemId ?? c.title;
 const anchorOf = (c: ReportCitation) => (c.itemId ? `r-${c.itemId}` : null);
+const ItemPath = createContext((id: string) => `/items/${encodeURIComponent(id)}`);
 const LINK = "inline-flex min-h-7 items-center gap-0.5 font-medium transition-colors hover:text-accent";
 /** What comes before `noun` at the end of `phrase` ("往期 AI " of "往期 AI 周报"), so the kind's name is its own text. */
 const before = (phrase: string, noun: string) => phrase.slice(0, -noun.length);
@@ -43,7 +44,7 @@ function Masthead({ report, index, quiet }: { report: ReportDetail; index: Repor
 
       <div className="flex items-stretch justify-between gap-5 py-6 @[880px]:gap-10 @[880px]:py-8">
         <div className="flex min-w-0 flex-col justify-center">
-          <h1 id="report-start" className="scroll-mt-[calc(var(--bar-h)+1.5rem)]">
+          <h1 id="report-start" data-page-title="" className="scroll-mt-[calc(var(--bar-h)+1.5rem)]">
             <span className="sr-only">
               {/* What the issue is searched by, as its title says, with its full date. */}
               {SEO_TITLES.latestReport(report.kind, dateLine(report.kind, report.key))}
@@ -113,6 +114,7 @@ function Original({ c, className = "" }: { c: ReportCitation; className?: string
  * Titles only, each to its page; a withdrawn one stays, struck through.
  */
 function Related({ items, className = "" }: { items: ReportCitation[]; className?: string }) {
+  const itemPath = useContext(ItemPath);
   return (
     <ul className={`space-y-1.5 ${className}`}>
       {items.map((r) => (
@@ -120,7 +122,7 @@ function Related({ items, className = "" }: { items: ReportCitation[]; className
           <span className="mt-[9px] size-1 shrink-0 rounded-full bg-ink-4" aria-hidden="true" />
           <span className="min-w-0">
             {r.available && r.itemId ? (
-              <IntentLink viewTransition to={`/items/${r.itemId}`} className="text-ink-2 transition-colors hover:text-accent">
+              <IntentLink viewTransition to={itemPath(r.itemId)} className="text-ink-2 transition-colors hover:text-accent">
                 {r.title}
               </IntentLink>
             ) : (
@@ -148,6 +150,7 @@ function Coverage({ c }: { c: ReportCitation }) {
 
 /** One story: source, headline, at most four lines of summary, and the original at the foot. */
 function Story({ c, slot, dated, className = "" }: { c: ReportCitation; slot: string; dated: boolean; className?: string }) {
+  const itemPath = useContext(ItemPath);
   return (
     <article id={anchorOf(c) ?? undefined} className={`flex min-w-0 scroll-mt-[calc(var(--bar-h)+1.5rem)] flex-col py-6 ${className}`}>
       <div className="flex items-center gap-2 text-[12px] text-ink-3">
@@ -159,7 +162,7 @@ function Story({ c, slot, dated, className = "" }: { c: ReportCitation; slot: st
         <>
           <h3 className="mt-3 text-[19px] font-bold leading-[1.5] tracking-[-0.01em] text-ink [text-wrap:pretty] @[880px]:text-[20px]">
             {c.itemId ? (
-              <IntentLink viewTransition to={`/items/${c.itemId}`} className="transition-colors hover:text-accent">
+              <IntentLink viewTransition to={itemPath(c.itemId)} className="transition-colors hover:text-accent">
                 {c.title}
               </IntentLink>
             ) : (
@@ -234,7 +237,7 @@ function Prose({ slot, text }: { slot: string; text: string }) {
  * Sections as pages. A story cited twice appears once, and
  * the story leading the front page is not repeated inside.
  */
-function pagesOf(report: ReportDetail, leadStory: ReportCitation | null): Page[] {
+function pagesOf(report: ReportDetail, leadStory: ReportCitation | null, keepSummary = false): Page[] {
   const seen = new Set<string>(leadStory ? [keyOf(leadStory)] : []);
   return report.sections
     .map((s, i) => ({
@@ -249,7 +252,7 @@ function pagesOf(report: ReportDetail, leadStory: ReportCitation | null): Page[]
           return true;
         }),
     }))
-    .filter((p) => p.items.length > 0);
+    .filter((p) => p.items.length > 0 || (keepSummary && p.summary));
 }
 
 /**
@@ -288,6 +291,7 @@ function Overview({ text }: { text: string }) {
 /** The front page: the lead beside a column of today's highlights and the index of pages. */
 function FrontPage({ report, pages, leadStory, count }: { report: ReportDetail; pages: Page[]; leadStory: ReportCitation | null; count: number }) {
   const daily = report.kind === "daily";
+  const itemPath = useContext(ItemPath);
   // A weekly or monthly leading with an event: the event's own summary; its overview stands above (Overview).
   const byEvent = daily || !!leadStory;
   // A picture that fails to load is dropped, and the lead is set as if it had none.
@@ -310,7 +314,7 @@ function FrontPage({ report, pages, leadStory, count }: { report: ReportDetail; 
         {cover && wide && <LeadPicture cover={cover} onError={() => setBroken(cover.url)} priority className="order-2 mt-5 @[560px]:order-1" />}
         <h2 className="order-1 mt-4 text-[32px] font-black leading-[1.28] tracking-[-0.03em] text-ink [text-wrap:balance] @[520px]:text-[40px] @[560px]:order-2 @[1040px]:text-[48px] @[1040px]:leading-[1.22]">
           {leadStory?.itemId ? (
-            <IntentLink viewTransition to={`/items/${leadStory.itemId}`} className="transition-colors hover:text-accent">
+            <IntentLink viewTransition to={itemPath(leadStory.itemId)} className="transition-colors hover:text-accent">
               {title}
             </IntentLink>
           ) : (
@@ -340,7 +344,7 @@ function FrontPage({ report, pages, leadStory, count }: { report: ReportDetail; 
             <ol className="mt-2">
               {highlights.map((h, i) => {
                 const anchor = anchorOf(h);
-                const to = anchor && inPage.has(h.itemId) ? `#${anchor}` : h.itemId ? `/items/${h.itemId}` : h.sourceUrl;
+                const to = anchor && inPage.has(h.itemId) ? `#${anchor}` : h.itemId ? itemPath(h.itemId) : h.sourceUrl;
                 if (!h.available) {
                   return (
                     <li key={keyOf(h)} className="flex gap-3.5 border-b border-line py-4">
@@ -474,8 +478,8 @@ function History({ report, index }: { report: ReportDetail; index: ReportNavigat
 }
 
 /** The issue's pages for the phone outline: the front page, each page under its number, then 快讯. */
-export function reportOutline(report: ReportDetail): OutlineEntry[] {
-  const pages = pagesOf(report, leadStoryOf(report));
+export function reportOutline(report: ReportDetail, keepSummary = false): OutlineEntry[] {
+  const pages = pagesOf(report, leadStoryOf(report), keepSummary);
   if (pages.length === 0 && report.flashes.length === 0) return [];
   return [
     { id: "report-start", text: "头版", level: 2, mark: "" },
@@ -484,13 +488,13 @@ export function reportOutline(report: ReportDetail): OutlineEntry[] {
   ];
 }
 
-export function ReportPaper({ report, index }: { report: ReportDetail; index: ReportNavigationEntry[] }) {
+export function ReportPaper({ report, index, itemPath = (id: string) => `/items/${encodeURIComponent(id)}`, keepSummary = false }: { report: ReportDetail; index: ReportNavigationEntry[]; itemPath?: (id: string) => string; keepSummary?: boolean }) {
   const daily = report.kind === "daily";
   const leadStory = leadStoryOf(report);
-  const pages = pagesOf(report, leadStory);
+  const pages = pagesOf(report, leadStory, keepSummary);
   const count = pages.reduce((sum, p) => sum + p.items.length, 0) + (leadStory ? 1 : 0);
   // Only a daily comes out with nothing in it: a day the editors judged with nothing new (REPORTS.quiet).
-  const quiet = count === 0 && report.flashes.length === 0;
+  const quiet = pages.length === 0 && count === 0 && report.flashes.length === 0 && !(keepSummary && report.lead?.leadParagraph);
   // Each name links once in the issue, where a reader meets it first: the texts in the order they are drawn.
   const slots: Array<[string, string | null]> = [
     ...(!daily && leadStory ? [["overview", report.overview] as [string, string | null]] : []),
@@ -500,7 +504,7 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
   const runs = linkMentions(slots.map(([, text]) => text), report.mentions);
   const linked = new Map(slots.map(([slot], i) => [slot, runs[i]]));
   return (
-    <Linked.Provider value={linked}>
+    <ItemPath.Provider value={itemPath}><Linked.Provider value={linked}>
     <article className="@container [overflow-wrap:anywhere]">
       <Masthead report={report} index={index} quiet={quiet} />
       {quiet ? (
@@ -537,7 +541,7 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
                       <span className="ml-2 text-[12px]">{WITHDRAWN_NOTE}</span>
                     </span>
                   ) : f.itemId ? (
-                    <Link viewTransition to={`/items/${f.itemId}`} className="text-ink transition-colors hover:text-accent">
+                    <Link viewTransition to={itemPath(f.itemId)} className="text-ink transition-colors hover:text-accent">
                       {f.title}
                     </Link>
                   ) : (
@@ -564,6 +568,6 @@ export function ReportPaper({ report, index }: { report: ReportDetail; index: Re
         </p>
       </footer>
     </article>
-    </Linked.Provider>
+    </Linked.Provider></ItemPath.Provider>
   );
 }

@@ -499,8 +499,8 @@ export async function collectSource(sourceId: string, opts: { force?: boolean; x
         }
         let newReposts = 0;
         for (const a of free.activities) {
-          const [saved] = await tx`INSERT INTO x_account_activity(source_id,tweet_id,kind,author,url,published_at,body)
-            VALUES (${sourceId},${a.tweetId},${a.kind},${a.author},${a.url},${a.publishedAt},${a.text ?? null})
+          const [saved] = await tx`INSERT INTO x_account_activity(source_id,tweet_id,kind,author,url,published_at,body,observed_at)
+            VALUES (${sourceId},${a.tweetId},${a.kind},${a.author},${a.url},${a.publishedAt},${a.text ?? null},${a.observedAt ?? null})
             ON CONFLICT (source_id,tweet_id,kind) DO UPDATE SET last_seen_at = now(),
               body = CASE WHEN length(coalesce(excluded.body,'')) > length(coalesce(x_account_activity.body,'')) THEN excluded.body ELSE x_account_activity.body END
             RETURNING first_seen_at = last_seen_at AS fresh`;

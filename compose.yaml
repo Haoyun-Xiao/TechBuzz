@@ -14,6 +14,7 @@ x-env: &engine-env
   ADMIN_PASSWORD: ${TECHBUZZ_ENGINE_ADMIN_PASSWORD:?set TECHBUZZ_ENGINE_ADMIN_PASSWORD}
   TECHBUZZ_X_PROVIDER: ${TECHBUZZ_X_PROVIDER:-free}
   SOCIALDATA_API_KEY: ${TECHBUZZ_SOCIALDATA_API_KEY:-}
+  TECHBUZZ_RESEARCH_URL: http://research:3000
   COLLECT_ENABLED: "true"
   MODEL_CALLS_ENABLED: "true"
   LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
@@ -35,6 +36,7 @@ x-research-runtime: &research-runtime
     - research-data:/research-data
     - ./bridge.mjs:/app/research/bridge.mjs:ro
     - ./bridge-import.mjs:/app/research/bridge-import.mjs:ro
+    - ./activity.mjs:/app/research/activity.mjs:ro
     - ./db.mjs:/app/research/db.mjs:ro
     - ./collector.mjs:/app/research/collector.mjs:ro
     - ./research.mjs:/app/research/research.mjs:ro
@@ -69,6 +71,7 @@ services:
     environment:
       <<: *engine-env
       TECHBUZZ_RESEARCH_URL: http://research:3000
+      TECHBUZZ_ADMIN_TOKEN: ${TECHBUZZ_ADMIN_TOKEN:-}
       API_HOST: 0.0.0.0
       API_PORT: "3001"
     volumes: [engine-data:/data]

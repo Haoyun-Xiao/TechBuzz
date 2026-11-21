@@ -8,6 +8,7 @@ import { SearchBusyError } from "@techbuzz/backend/publication/pool";
 import { selectedChanges, selectedSnapshot, SnapshotRequiredError, v1Items } from "@techbuzz/backend/publication/v1";
 import { resolveStory, v1HotTopics, v1Story } from "@techbuzz/backend/publication/stories";
 import { isPeriodKey, v1Dailies, v1Daily, v1Period, v1Periods } from "@techbuzz/backend/publication/reports";
+import { RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY, ResearchQueryError, researchPublication, researchRead, researchRequired } from "@techbuzz/backend/publication/research";
 import { isValidDate } from "@techbuzz/contracts/time";
 import { requestNotice } from "@techbuzz/backend/modules";
 import { applyPublicHeaders, QueryError, sendJsonWithNotice, sendJsonWithEtag, sendProblem, strictQuery } from "../http/respond.ts";
@@ -63,7 +64,7 @@ export function publicHandler(fn: Handler): Handler {
     try {
       return await fn(req, reply);
     } catch (error) {
-      if (error instanceof QueryError) return sendProblem(req, reply, { status: 400, code: "invalid_request", title: "Invalid request", detail: error.message });
+      if (error instanceof QueryError || error instanceof ResearchQueryError) return sendProblem(req, reply, { status: 400, code: "invalid_request", title: "Invalid request", detail: error.message });
       if (error instanceof InvalidCursorError) {
         return sendProblem(req, reply, { status: 400, code: "invalid_cursor", title: "Invalid cursor", detail: "The cursor is malformed." });
       }
@@ -85,6 +86,10 @@ export function publicHandler(fn: Handler): Handler {
 
 export function registerV1(app: FastifyInstance) {
   app.get("/api/v1/items", publicHandler(async (req, reply) => {
+    if (researchPublication()) {
+      const q = strictQuery(req, RESEARCH_ITEM_QUERY, RESEARCH_REPEATED_QUERY);
+      return sendV1(req, reply, await researchRequired("/api/public/items", q), { etagPrefix: "v1-items", cacheControl: V1_OPERATIONS.items.cacheControl });
+    }
     const q = strictQuery(req, V1_OPERATIONS.items.queryKeys);
     const mode = enumParam(q.mode, "mode", ["selected", "all"] as const, "selected");
     const window = enumParam(q.window, "window", ["24h", "7d"] as const, "7d");
@@ -104,14 +109,25 @@ export function registerV1(app: FastifyInstance) {
 
   app.get("/api/v1/hot-topics", publicHandler(async (req, reply) => {
     strictQuery(req, V1_OPERATIONS.hotTopics.queryKeys);
-    const body = await v1HotTopics();
+    const body = researchPublication() ? await researchRequired<object>("/api/public/hot") : await v1HotTopics();
     return sendV1(req, reply, body, { etagPrefix: "v1-hot", cacheControl: V1_OPERATIONS.hotTopics.cacheControl });
+  }));
+
+  app.get("/api/v1/topics", publicHandler(async (req, reply) => {
+    strictQuery(req, []);
+    if (!researchPublication()) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "Research topics are unavailable." });
+    return sendV1(req, reply, await researchRequired("/api/public/topics"), { etagPrefix: "v1-topics", cacheControl: V1_OPERATIONS.items.cacheControl });
   }));
 
   app.get("/api/v1/stories/:publicId", publicHandler(async (req, reply) => {
     strictQuery(req, V1_OPERATIONS.storyByPublicId.queryKeys);
     const publicId = (req.params as { publicId: string }).publicId;
     if (publicId.length > 128) throw new QueryError("publicId must be a short opaque id.");
+    if (researchPublication()) {
+      const body = await researchRead<object>(`/api/public/stories/${encodeURIComponent(publicId)}`);
+      if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `No public story exists for ${publicId}.` });
+      return sendV1(req, reply, body, { etagPrefix: "v1-story", cacheControl: V1_OPERATIONS.storyByPublicId.cacheControl });
+    }
     const found = await resolveStory(publicId);
     if (found.kind === "merged") {
       return reply.code(308).header("Location", `/api/v1/stories/${found.target}`).header("Cache-Control", V1_OPERATIONS.storyByPublicId.cacheControl).send();
@@ -124,13 +140,14 @@ export function registerV1(app: FastifyInstance) {
   app.get("/api/v1/dailies", publicHandler(async (req, reply) => {
     const q = strictQuery(req, V1_OPERATIONS.dailies.queryKeys);
     const limit = intParam(q.limit, "limit", 1, 180, 30);
-    return sendV1(req, reply, await v1Dailies(limit), { etagPrefix: "v1-dailies", cacheControl: V1_OPERATIONS.dailies.cacheControl });
+    const body = researchPublication() ? await researchRequired<object>("/api/public/dailies", { limit }) : await v1Dailies(limit);
+    return sendV1(req, reply, body, { etagPrefix: "v1-dailies", cacheControl: V1_OPERATIONS.dailies.cacheControl });
   }));
 
   app.get("/api/v1/dailies/latest", publicHandler(async (req, reply) => {
     strictQuery(req, V1_OPERATIONS.latestDaily.queryKeys);
-    const body = await v1Daily("latest");
-    if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: "No daily report has been published yet." });
+    const body = researchPublication() ? await researchRead<object>("/api/public/dailies/latest") : await v1Daily("latest");
+    if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: researchPublication() ? "The research daily report for the scheduled Beijing date is not available." : "No daily report has been published yet." });
     return sendV1(req, reply, body, { etagPrefix: "v1-daily", cacheControl: V1_OPERATIONS.latestDaily.cacheControl });
   }));
 
@@ -138,7 +155,7 @@ export function registerV1(app: FastifyInstance) {
     strictQuery(req, V1_OPERATIONS.dailyByDate.queryKeys);
     const date = (req.params as { date: string }).date;
     if (!isValidDate(date)) throw new QueryError("date must be a real YYYY-MM-DD calendar date.");
-    const body = await v1Daily(date);
+    const body = researchPublication() ? await researchRead<object>(`/api/public/dailies/${date}`) : await v1Daily(date);
     if (!body) return sendProblem(req, reply, { status: 404, code: "not_found", detail: `No daily report exists for ${date}.`, cacheControl: "public, max-age=60" });
     return sendV1(req, reply, body, { etagPrefix: "v1-daily", cacheControl: V1_OPERATIONS.dailyByDate.cacheControl });
   }));
@@ -173,7 +190,9 @@ export function registerV1(app: FastifyInstance) {
     const q = strictQuery(req, V1_OPERATIONS.selectedSnapshot.queryKeys);
     const fields = q.fields === undefined ? undefined : enumParam(q.fields, "fields", ["default", "minimal"] as const, "default");
     const limit = intParam(q.limit, "limit", 1, 1000, 500);
-    const body = await selectedSnapshot({ fields, limit, page: q.page ?? null });
+    const body = researchPublication()
+      ? await researchRequired<Awaited<ReturnType<typeof selectedSnapshot>>>("/api/public/selected/snapshot", { fields, limit, page: q.page })
+      : await selectedSnapshot({ fields, limit, page: q.page ?? null });
     // asOf (and the next-page token that carries it) differ per request; the page content does not.
     const etagOf = { fields: body.fields, cursor: body.cursor, count: body.count, hasMore: body.hasMore, items: body.items };
     return sendV1(req, reply, body, { etagPrefix: "v1-snapshot", cacheControl: V1_OPERATIONS.selectedSnapshot.cacheControl, etagOf });
@@ -183,7 +202,9 @@ export function registerV1(app: FastifyInstance) {
     const q = strictQuery(req, V1_OPERATIONS.selectedChanges.queryKeys);
     const limit = intParam(q.limit, "limit", 1, 100, 100);
     if (!q.cursor) throw new SnapshotRequiredError("missing cursor");
-    const body = await selectedChanges({ cursor: q.cursor, limit });
+    const body = researchPublication()
+      ? await researchRequired<object>("/api/public/selected/changes", { cursor: q.cursor, limit })
+      : await selectedChanges({ cursor: q.cursor, limit });
     return sendV1(req, reply, body, { etagPrefix: "v1-changes", cacheControl: V1_OPERATIONS.selectedChanges.cacheControl });
   }));
 }

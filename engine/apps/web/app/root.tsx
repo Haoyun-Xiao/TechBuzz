@@ -18,6 +18,8 @@ import { APPEARANCE_BOOT_SCRIPT, useAppearanceSync } from "./lib/local-state";
 import { useHydratedFlag } from "./lib/hydration";
 import { titled } from "./lib/seo";
 import { webModules } from "./site-modules";
+import { researchEnabled } from "./features/research/load.server";
+import { useResearchMode } from "./components/shell/nav";
 
 export const links: Route.LinksFunction = () => [
   { rel: "icon", href: "/favicon.ico", sizes: "any" },
@@ -29,7 +31,7 @@ export const links: Route.LinksFunction = () => [
 
 /** The release rendering this document: once a newer one is deployed, a render error reloads the page (entry.client). */
 export function loader() {
-  return { release: process.env.TECHBUZZ_RELEASE ?? null };
+  return { release: process.env.TECHBUZZ_RELEASE ?? null, researchMode: researchEnabled() };
 }
 
 export const shouldRevalidate: ShouldRevalidateFunction = () => false;
@@ -70,6 +72,7 @@ export function meta({ error }: Route.MetaArgs) {
 /** Sidebar, main column and phone tab bar around a page (or an error). */
 function SiteShell({ children }: { children: ReactNode }) {
   const navigation = useNavigation();
+  const research = useResearchMode();
   // The phone search and pull-to-refresh are client-side, mounted once the page is interactive.
   const [interactive, setInteractive] = useState(false);
   useEffect(() => setInteractive(true), []);
@@ -84,14 +87,14 @@ function SiteShell({ children }: { children: ReactNode }) {
       <Sidebar />
       {/* Phone shell (≤ 699px): each page's top bar (PhoneBar), one centred column, the tab bar below.
           Desktop: the page fills the main area up to the list width (--page-max-wide), centred beyond it. */}
-      <main id="main" className="min-w-0 flex-1 pb-[calc(72px+env(safe-area-inset-bottom))] lg:px-5 lg:pb-[72px] lg:pt-6 wide:px-7">
+      <main id="main" className={`min-w-0 flex-1 lg:px-5 lg:pb-[72px] lg:pt-6 wide:px-7 ${research ? "pb-[calc(120px+env(safe-area-inset-bottom))] sm:pb-[calc(72px+env(safe-area-inset-bottom))]" : "pb-[calc(72px+env(safe-area-inset-bottom))]"}`}>
         <div className="mx-auto w-full max-w-[640px] pl-[var(--gutter-l)] pr-[var(--gutter-r)] lg:max-w-[var(--page-max-wide)] lg:px-0">
           {webModules().map((m) => m.root?.Top && <m.root.Top key={m.name} />)}
           {children}
         </div>
       </main>
       <TabBar />
-      {interactive && <SearchOverlay />}
+      {interactive && !research && <SearchOverlay />}
       {interactive && <PullToRefresh />}
       <BackToTop />
     </div>

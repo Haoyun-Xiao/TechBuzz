@@ -25,13 +25,13 @@ export function KindSwitch({ kind, phone = false, layoutId = phone ? "report-kin
 }
 
 /** Wide desktop archive column: every issue of this kind, grouped, the current one highlighted. */
-export function ReportArchive({ kind, index, current }: { kind: ReportKind; index: ReportNavigationEntry[]; current: string | null }) {
+export function ReportArchive({ kind, index, current, dailyOnly }: { kind: ReportKind; index: ReportNavigationEntry[]; current: string | null; dailyOnly?: boolean }) {
   const groups = archiveGroups(kind, index);
   const openId = groups.find((g) => g.entries.some((e) => e.key === current))?.id ?? groups[0]?.id;
   return (
     <aside className="sticky top-0 hidden h-dvh w-[280px] shrink-0 flex-col border-r border-line bg-[color-mix(in_srgb,var(--sidebar)_50%,var(--surface))] pl-5 pr-3 side:flex dark:bg-[color-mix(in_srgb,var(--sidebar)_50%,var(--bg))]">
       <div className="pb-4 pt-8">
-        <KindSwitch kind={kind} />
+        {dailyOnly ? <h2 className="pl-1 text-lg font-semibold text-ink">日报</h2> : <KindSwitch kind={kind} />}
       </div>
       <div className="border-b border-line-strong pb-2 pl-1 text-[11.5px] font-semibold tracking-[0.3em] text-ink">往期</div>
       <nav aria-label={`${REPORT_NAMES[kind]}历史`} className="scrollbar-thin -mr-3 flex-1 overflow-y-auto pb-6 pr-3">

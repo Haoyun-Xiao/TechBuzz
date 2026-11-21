@@ -1,4 +1,3 @@
-import { Research } from "../features/research/Research";
 import { redirect, useLoaderData } from "react-router";
 import { SITE } from "@techbuzz/site";
 import type { Route } from "./+types/home";
@@ -12,12 +11,19 @@ import { Timeline } from "../features/feed/Timeline";
 import { HotTopics } from "../features/feed/HotTopics";
 import { ActiveFilters, CategoryTabs, FeedBar, SearchField } from "../features/feed/Filters";
 
+import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { feedPage, ResearchFeed } from "../features/research/ResearchFeed";
+
 export const handle: Screen = { tab: "featured", name: "精选" };
 export { pageHeaders as headers } from "../lib/api.server";
 export const { clientLoader, shouldRevalidate } = pageReuse<typeof loader>();
 
 export async function loader({ request }: Route.LoaderArgs) {
   const url = new URL(request.url);
+  if (researchEnabled()) {
+    if (url.searchParams.get("q")?.trim()) throw redirect(`/all${url.search}`);
+    return researchPage({ research: feedPage(await loadResearch(request), url.searchParams, true) });
+  }
   const q = url.searchParams.get("q");
   // Search lives on /all; keep the parameters so old links still land on results.
   if (q && q.trim()) throw redirect(`/all${url.search}`);
@@ -25,10 +31,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   const upstream = new Headers();
   const data = await loadOr404<TimelineResponse>(listPath("/api/site/timeline", filterParams(filters)), { responseHeaders: upstream, signal: request.signal });
   // A minute at most, here and on /all: new selections must not wait longer at the edge or in a browser.
-  return cachedPage(60, { researchEnabled: !!process.env.TECHBUZZ_RESEARCH_URL, data, filters }, upstream);
+  return cachedPage(60, { data, filters }, upstream);
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
+  if (loaderData && "research" in loaderData) return pageMeta({ path: "/" });
   const path = listPath("/", loaderData ? filterParams(loaderData.filters) : {});
   const titles = loaderData?.data.cards.map((c) => c.item.title) ?? [];
   const tags = pageMeta({ path, noindex: hasFeedFilters(loaderData?.filters), jsonLd: path === "/" ? [...siteLd(), itemListLd("/", "精选", titles)] : undefined });
@@ -38,7 +45,12 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function Home() {
-  const { researchEnabled, data, filters } = useLoaderData<typeof loader>();
+  const result = useLoaderData<typeof loader>();
+  if ("research" in result) return <ResearchFeed feed={result.research} featured />;
+  return <StandaloneHome {...result} />;
+}
+
+function StandaloneHome({ data, filters }: Pick<Exclude<Awaited<ReturnType<typeof useLoaderData<typeof loader>>>, { research: unknown }>, "data" | "filters">) {
   const title = filters.tag ? `#${filters.tag}` : "精选";
   return (
     <div className="pb-6">
@@ -53,7 +65,6 @@ export default function Home() {
         </div>
       </div>
 
-      {researchEnabled && !hasFeedFilters(filters) && <details open className="mb-6"><summary className="cursor-pointer text-[17px] font-semibold text-ink">研究评分精选</summary><Research initial="picks" embedded /></details>}
 
       {data.hot && inNav("/hot") && <HotTopics entries={data.hot} />}
 

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { openDatabase } from './db.mjs';
 import { ingestPosts } from './collector.mjs';
 import { sourceIds, syncResearch } from './bridge.mjs';
+import { dashboard } from './dashboard.mjs';
 
 const x = (id, handle, extra = {}) => ({
   tweetId: id, handle, authorName: handle, text: `original ${id}`, media: [], ...extra,
@@ -16,10 +17,10 @@ const row = (id, handle, time, extra = {}, verified = null, fetched = true) => (
 const states = sourceIds.map(id => ({
   id, cursor: null, enabled: true, new_count: null, last_fetch_at: null, last_ok_at: null, last_error: null,
 }));
-const query = (rows, sources = states) => (strings, ...values) => {
+const query = (rows, sources = states, activities = []) => (strings, ...values) => {
   if (!Object.hasOwn(strings, 'raw')) return strings;
   assert.deepEqual(values[0], sourceIds);
-  return strings.join().includes('FROM articles') ? rows : sources;
+  return strings.join().includes('FROM articles') ? rows : strings.join().includes('FROM x_account_activity') ? activities : sources;
 };
 
 test('the research cache takes engine revisions and references without polling or changing research state', async () => {
@@ -47,4 +48,67 @@ test('the research cache takes engine revisions and references without polling o
   } finally {
     db.close();
   }
+});
+
+test('reposts remain separate observations with original attribution and timestamps', async () => {
+  const db = openDatabase(':memory:');
+  try {
+    const activity = (author, source, id) => ({ source_id: source, tweet_id: id, kind: 'repost', author,
+      url: `https://x.com/${author}/status/${id}`, published_at: new Date('2026-11-01T00:00Z'),
+      first_seen_at: new Date('2026-11-20T00:00Z'), last_seen_at: new Date('2026-11-21T00:00Z'), body: 'original text' });
+    const foreign = row('7', 'SemiAnalysis_', '2026-11-20T00:00Z', { handle: 'other' });
+    await syncResearch(db, query([foreign], states, [activity('other', 'x-semianalysis_', '99'), activity('SemiAnalysis_', 'x-semianalysis_', '100')]));
+    const result = dashboard(db);
+    assert.equal(result.posts.length, 0);
+    assert.equal(result.activity.length, 2);
+    assert.deepEqual(result.activity.find(item => item.tweetId === '99'), {
+      source: 'semianalysis_', tweetId: '99', kind: 'repost', author: 'other', url: 'https://x.com/other/status/99',
+      publishedAt: '2026-11-01T00:00:00.000Z', firstSeenAt: '2026-11-20T00:00:00.000Z',
+      lastSeenAt: '2026-11-21T00:00:00.000Z', body: 'original text',
+    });
+    await syncResearch(db, query([], states));
+    assert.equal(dashboard(db).activity.length, 0);
+  } finally { db.close(); }
+});
+
+test('free observation ranges do not claim complete history', async () => {
+  const db = openDatabase(':memory:');
+  try {
+    const freeStates = states.map((state, index) => index ? state : { ...state,
+      cursor: { freeX: { backfillComplete: true }, xCoverageStart: '2026-11-01T00:00:00Z', xCoverageEnd: '2026-11-20T00:00:00Z', xLastCount: 3 },
+      last_ok_at: new Date('2026-11-21T00:00:00Z') });
+    await syncResearch(db, query([], freeStates));
+    const source = dashboard(db).sources.find(item => item.handle.toLowerCase() === sourceIds[0].slice(2));
+    assert.equal(source.coverageMode, 'free');
+    assert.equal(source.backfillComplete, false);
+    assert.equal(source.pageState, '已到达公开分页边界');
+    assert.equal(source.coverageStart, '2026-11-01T00:00:00Z');
+    freeStates[0].cursor.freeX.backfillComplete = false;
+    await syncResearch(db, query([], freeStates));
+    assert.equal(dashboard(db).sources.find(item => item.handle === source.handle).pageState, '分页进行中');
+  } finally { db.close(); }
+});
+
+test('partial free reads expose failures and pending retries without discarding successful posts', async () => {
+  const db = openDatabase(':memory:');
+  try {
+    const freeStates = states.map((state, index) => index ? state : { ...state,
+      cursor: { freeX: { freeXBackfill: { errors: ['timeline failed'] }, freeXDetailFailures: 1,
+        freeXPending: [{ id: '7' }, { id: '8' }] }, xLastCount: 0 },
+      last_ok_at: new Date('2026-11-21T00:00:00Z') });
+    await syncResearch(db, query([row('1', 'SemiAnalysis_', '2026-11-20T02:00:00Z')], freeStates));
+    let result = dashboard(db);
+    let source = result.sources.find(item => item.handle.toLowerCase() === sourceIds[0].slice(2));
+    assert.equal(source.status, 'partial');
+    assert.equal(source.partialRead, true);
+    assert.equal(source.pendingCount, 2);
+    assert.equal(result.posts.length, 1);
+    freeStates[0].cursor.freeX.freeXBackfill.errors = [];
+    freeStates[0].cursor.freeX.freeXDetailFailures = 0;
+    await syncResearch(db, query([], freeStates));
+    source = dashboard(db).sources.find(item => item.handle.toLowerCase() === sourceIds[0].slice(2));
+    assert.equal(source.status, 'awaiting');
+    assert.equal(source.partialRead, false);
+    assert.equal(source.pendingCount, 2);
+  } finally { db.close(); }
 });

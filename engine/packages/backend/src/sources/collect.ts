@@ -10,6 +10,8 @@ import { enqueue, QUEUES, shutdownSignal } from "../jobs/queue.ts";
 import { runOwner } from "../jobs/runs.ts";
 import { queueProcessing } from "../jobs/content.ts";
 import { BudgetExceededError, completeReceipt } from "../providers/receipts.ts";
+import { fetchFreeX } from "./free-x.ts";
+import { xHandle } from "./account.ts";
 import { fetchRss } from "./rss.ts";
 import { fetchDetail, fetchWebList, isCallToActionTitle, needsTitle, type DetailNeed } from "./web-list.ts";
 import { unsupportedConfig } from "./config-keys.ts";
@@ -286,6 +288,10 @@ async function store(sourceId: string, kind: string, candidates: CollectionCandi
     if (c.detailRules) await sql`UPDATE articles SET raw = jsonb_set(
       CASE WHEN jsonb_typeof(raw) = 'object' THEN raw ELSE '{}'::jsonb END,
       '{collectionDetail}', ${sql.json({ rules: c.detailRules })}) WHERE id = ${res.articleId} AND source_id = ${sourceId}`;
+    const article = (c.raw as { freeXArticle?: { text: string; title: string; html?: string } } | null)?.freeXArticle;
+    if (article?.text) await sql`UPDATE articles SET x_article = ${sql.json(article as never)}
+      WHERE id = ${res.articleId} AND source_id = ${sourceId} AND body_text = ${c.bodyText ?? null}
+        AND x_article IS DISTINCT FROM ${sql.json(article as never)}::jsonb`;
     await storeCover(res.articleId, res.created, c, kind);
     if (res.created) created += 1;
     if (res.revised) revised += 1;
@@ -321,7 +327,7 @@ async function recordFetch(db: Db, sourceId: string, runId: number, run: { found
       fail_count = CASE WHEN ${run.budget} THEN fail_count ELSE fail_count + 1 END,
       last_error = ${run.error},
       health = CASE WHEN NOT enabled THEN 'paused' WHEN ${run.budget} THEN health WHEN fail_count + 1 >= 5 THEN 'failing' ELSE 'degraded' END,
-      next_fetch_at = now() + make_interval(mins => CASE WHEN ${run.budget} THEN 15 ELSE LEAST(interval_minutes * (fail_count + 2), 360) END),
+      next_fetch_at = now() + make_interval(mins => CASE WHEN kind = 'x_search' AND ${process.env.TECHBUZZ_X_PROVIDER === 'free'} THEN interval_minutes WHEN ${run.budget} THEN 15 ELSE LEAST(interval_minutes * (fail_count + 2), 360) END),
       updated_at = now()
     WHERE id = ${sourceId}`;
 }
@@ -337,6 +343,14 @@ export async function collectSource(sourceId: string, opts: { force?: boolean; x
   }
 
   const [run] = await sql<{ id: number }[]>`INSERT INTO fetch_runs (source_id, detail) VALUES (${sourceId}, ${sql.json({ owner: await runOwner() })}) RETURNING id`;
+  // Coverage and pagination belong to the transport that observed them.
+  if (source.cursor?.xProvider === "free" && process.env.TECHBUZZ_X_PROVIDER === "socialdata") {
+    const [restored] = await sql`UPDATE sources
+      SET cursor = (cursor - 'xCoverageStart' - 'xCoverageEnd' - 'xLastCount' - 'initializedAt')
+        || coalesce(cursor->'paidX', '{}'::jsonb) || '{"xProvider":"socialdata"}'::jsonb
+      WHERE id = ${sourceId} AND cursor->>'xProvider' = 'free' RETURNING cursor`;
+    source.cursor = restored?.cursor ?? (await loadSource(sourceId))?.cursor ?? null;
+  }
   const firstImport = !source.cursor?.initializedAt;
   const windowDays = source.kind === "x_search" && !opts.xSince ? Number(source.config._techbuzz?.initialBackfillDays ?? 0) : 0;
   let startingWindow: XWindow | null = null;
@@ -350,6 +364,7 @@ export async function collectSource(sourceId: string, opts: { force?: boolean; x
     const unsupported = unsupportedConfig(source.kind, source.config);
     if (unsupported.length) throw new FetchError(`unsupported config: ${unsupported.join(", ")}`);
     let candidates: CollectionCandidate[];
+    let free: Awaited<ReturnType<typeof fetchFreeX>> | undefined;
     let paidReceiptIds: number[] = [];
     let nextCursor: Record<string, unknown> = { ...(source.cursor ?? {}) };
     let detail: Record<string, unknown> | null = null;
@@ -368,6 +383,22 @@ export async function collectSource(sourceId: string, opts: { force?: boolean; x
     }
     else if (source.kind === "web_list") candidates = await fetchWebList(source);
     else if (source.kind === "json_list") candidates = await fetchJsonList(source);
+    else if (source.kind === "x_search" && process.env.TECHBUZZ_X_PROVIDER === "free") {
+      const handle = xHandle(source.config);
+      if (!handle) throw new FetchError("Free X collection requires an account handle");
+      free = await fetchFreeX(handle, source.cursor?.freeX ?? {});
+      candidates = free.items;
+      if (source.cursor?.xProvider !== "free") {
+        nextCursor.paidX = Object.fromEntries(["xCoverageStart", "xCoverageEnd", "xWindow", "initializedAt", "xLastCount"]
+          .filter(k => source.cursor?.[k] != null).map(k => [k, source.cursor![k]]));
+      }
+      nextCursor.freeX = free.cursor;
+      nextCursor.xProvider = "free";
+      nextCursor.xCoverageStart = free.cursor.xCoverageStart ?? null;
+      nextCursor.xCoverageEnd = free.cursor.xCoverageEnd ?? null;
+      delete nextCursor.xWindow;
+      detail = { provider: "free", activities: free.activities.length, backfill: free.cursor.freeXBackfill ?? null };
+    }
     else if (windowDays > 0) {
       const previousEnd = Date.parse(String(source.cursor?.xCoverageEnd ?? ""));
       const now = Date.now();
@@ -456,9 +487,28 @@ export async function collectSource(sourceId: string, opts: { force?: boolean; x
         delete nextCursor.xWindow;
       } else nextCursor.xWindow = windowState;
     }
-    if (firstImport && (!windowDays || completedWindow)) nextCursor.initializedAt = new Date().toISOString();
+    if (firstImport && (!windowDays || completedWindow || free)) nextCursor.initializedAt = new Date().toISOString();
     nextCursor.lastOkAt = new Date().toISOString();
     await sql.begin(async (tx) => {
+      if (free) {
+        const [current] = await tx`SELECT 1 FROM sources WHERE id = ${sourceId}
+          AND cursor->'freeX' IS NOT DISTINCT FROM ${source.cursor?.freeX ? tx.json(source.cursor.freeX) : null}::jsonb FOR UPDATE`;
+        if (!current) {
+          await tx`UPDATE fetch_runs SET status = 'skipped', finished_at = now() WHERE id = ${run!.id}`;
+          return;
+        }
+        let newReposts = 0;
+        for (const a of free.activities) {
+          const [saved] = await tx`INSERT INTO x_account_activity(source_id,tweet_id,kind,author,url,published_at,body)
+            VALUES (${sourceId},${a.tweetId},${a.kind},${a.author},${a.url},${a.publishedAt},${a.text ?? null})
+            ON CONFLICT (source_id,tweet_id,kind) DO UPDATE SET last_seen_at = now(),
+              body = CASE WHEN length(coalesce(excluded.body,'')) > length(coalesce(x_account_activity.body,'')) THEN excluded.body ELSE x_account_activity.body END
+            RETURNING first_seen_at = last_seen_at AS fresh`;
+          if (a.kind === 'repost' && saved?.fresh) newReposts++;
+        }
+        detail = { ...detail, newReposts };
+        nextCursor.xLastCount = created + newReposts;
+      }
       const [current] = startingWindow ? await tx`
         SELECT 1 FROM sources WHERE id = ${sourceId} AND cursor->'xWindow' = ${sql.json(startingWindow as never)}::jsonb FOR UPDATE` : [];
       if (startingWindow && !current) {

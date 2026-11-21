@@ -63,6 +63,11 @@ export function initCollector(db) {
     );
     CREATE INDEX IF NOT EXISTS x_posts_handle_date ON x_posts (handle, published_at DESC);
   `);
+  const columns = new Set(db.prepare('PRAGMA table_info(x_sources)').all().map(column => column.name));
+  if (!columns.has('coverage_mode')) db.exec("ALTER TABLE x_sources ADD COLUMN coverage_mode TEXT NOT NULL DEFAULT 'socialdata'");
+  if (!columns.has('page_state')) db.exec('ALTER TABLE x_sources ADD COLUMN page_state TEXT');
+  if (!columns.has('partial_read')) db.exec('ALTER TABLE x_sources ADD COLUMN partial_read INTEGER NOT NULL DEFAULT 0');
+  if (!columns.has('pending_count')) db.exec('ALTER TABLE x_sources ADD COLUMN pending_count INTEGER NOT NULL DEFAULT 0');
   const statement = db.prepare('INSERT OR IGNORE INTO x_sources (handle) VALUES (?)');
   for (const handle of handles) statement.run(handle);
 }
@@ -236,10 +241,15 @@ export function sources(db) {
     const pending = row.pending ? JSON.parse(row.pending) : null;
     let status = row.last_success ? row.last_count ? 'ok' : 'empty' : 'pending';
     if (pending) status = row.coverage_start ? 'catching-up' : 'backfilling';
+    if (row.pending_count) status = 'awaiting';
+    if (row.partial_read) status = 'partial';
     if (row.error) status = row.error === missingKey ? 'unconfigured' : 'error';
     return {
       handle, status, lastSuccess: row.last_success, lastAttempt: row.last_attempt, error: row.error,
-      coverageStart: row.coverage_start, coverageEnd: row.coverage_end, backfillComplete: !!row.coverage_start,
+      coverageStart: row.coverage_start, coverageEnd: row.coverage_end,
+      coverageMode: row.coverage_mode, pageState: row.page_state,
+      partialRead: !!row.partial_read, pendingCount: row.pending_count,
+      backfillComplete: row.coverage_mode !== 'free' && !!row.coverage_start,
       latestPostAt: row.latest_post_at, postCount: row.post_count, sampleCount: row.sample_count, lastCount: row.last_count,
     };
   });

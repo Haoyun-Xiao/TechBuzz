@@ -30,6 +30,7 @@ export interface XPostData {
   lang?: string | null;
   replyTo?: string | null;
   replyToHandle?: string | null;
+  replyContext?: { id: string; handle: string; authorName: string; url: string; text: string; publishedAt: string | null };
   quoteId?: string | null;
   repostOf?: { id: string; handle?: string; authorName?: string; text?: string; url?: string; media?: MediaItem[] } | null;
 }

@@ -894,6 +894,7 @@ async function markUnconfirmed(articleId: string, revision: number): Promise<"un
  * the judging steps are told the article was not fetched.
  */
 async function extractXArticle(articleId: string, tweetId: string, revision: number): Promise<"ok" | "unconfirmed" | "skipped"> {
+  if (process.env.TECHBUZZ_X_PROVIDER === "free") return markUnconfirmed(articleId, revision);
   const found = await getArticle(tweetId, { purpose: "x_article", subject: `article:${articleId}` });
   const got = found ? xArticleText(found, `https://x.com/i/status/${tweetId}`) : null;
   if (!got) {

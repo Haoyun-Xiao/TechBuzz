@@ -65,6 +65,7 @@ function apiBase(): string {
  */
 async function get<T>(path: string, request: Omit<ReceiptRequest, "service">,
   read: { timeoutMs: number; maxBytes: number; missing?: Record<string, unknown>; settle: (json: T) => CallOutcome }): Promise<ReceiptResult> {
+  if (process.env.TECHBUZZ_X_PROVIDER === "free") throw new Error("SocialData disabled in free X mode");
   const key = credential("collectors", "SOCIALDATA_API_KEY");
   if (!key) throw new Error("SOCIALDATA_API_KEY is not configured");
   return paidRequest({ service: "socialdata", ...request }, async () => {

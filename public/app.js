@@ -239,6 +239,8 @@ function statusOf(source) {
     empty: ["已查无新增", "source-ok"],
     ok: ["读取成功", "source-ok"],
     error: ["读取失败", "source-error"],
+    partial: ["部分读取", "source-warn"],
+    awaiting: ["待补读", "source-warn"],
   };
   if (Object.hasOwn(states, source.status)) return states[source.status];
   if (source.error || ["failed", "failure"].includes(source.status)) return ["读取失败", "source-error"];
@@ -274,13 +276,14 @@ function activityPanel() {
 function sourcesPanel() {
   const sources = list(payload.sources);
   const success = sources.filter(source => statusOf(source)[1] === "source-ok").length;
+  const free = sources.some(source => source.coverageMode === "free");
   const backfilled = sources.filter(source => source.backfillComplete).length;
   const sampleDates = byNewest([...posts.values()].filter(post => post.sample), "publishedAt");
   const sampleStart = sampleDates.at(-1)?.publishedAt;
   const sampleEnd = sampleDates[0]?.publishedAt;
   return `<section class="panel">
     ${sectionHeading("关注来源", internal("采集状态", "admin"))}
-    <div class="panel-body meta"><span>${success}/${sources.length} 个账号最近读取成功</span><span>${backfilled}/${sources.length} 个账号完成历史回填</span></div>
+    <div class="panel-body meta"><span>${success}/${sources.length} 个账号最近读取成功</span>${free ? "<span>免费来源范围为实际观察区间</span>" : `<span>${backfilled}/${sources.length} 个账号完成历史回填</span>`}</div>
     ${sampleDates.length ? `<div class="panel-body meta coverage-sample"><span>${sampleDates.length} 条演示样本</span><span>${esc(day(sampleStart))}${day(sampleStart) !== day(sampleEnd) ? ` 至 ${esc(day(sampleEnd))}` : ""}</span></div>` : ""}
     <ul class="source-list">${sources.map(source => {
       const [label, cls] = statusOf(source);
@@ -494,6 +497,23 @@ function filterForm(page, query, taxonomy) {
   </form>`;
 }
 
+function repostActivity(query) {
+  const source = handle(query.get("source")).toLowerCase();
+  const needle = (query.get("q") || "").toLowerCase().trim();
+  // Topic, company and date filters apply to analyzed posts, not unscored observations.
+  if (["topic", "company", "date", "period"].some(key => query.get(key))) return "";
+  const activities = list(payload.activity).filter(item => (!source || handle(item.source).toLowerCase() === source)
+    && (!needle || [item.body, item.author, item.source].some(value => String(value ?? "").toLowerCase().includes(needle))));
+  if (!activities.length) return "";
+  return section("转发观察", `<p class="hint">按首次观察时间排列；转发的确切时间未知，不计入发帖时间线或研究评分。</p><div class="panel">${byNewest(activities, "firstSeenAt").map(item => {
+    const account = list(payload.sources).find(source => handle(source.handle).toLowerCase() === handle(item.source).toLowerCase())?.handle || item.source;
+    const self = item.author && handle(item.author).toLowerCase() === handle(item.source).toLowerCase();
+    return `<article class="list-row"><h3>@${esc(handle(account))} ${self ? "转发了自己的帖子" : "转发"}</h3>
+      <div class="meta"><span>原作者 ${item.author ? `@${esc(handle(item.author))}` : "未知"}</span><span>原帖发布 ${stamp(item.publishedAt)}</span><span>首次观察 ${stamp(item.firstSeenAt)}</span><span>转发时间未知</span></div>
+      ${item.body ? `<p>${esc(item.body)}</p>` : ""}${urlLink(item.url, "查看原帖")}</article>`;
+  }).join("")}</div>`);
+}
+
 function feed(page, query) {
   const curated = page === "picks";
   const topicPage = page === "topics";
@@ -523,7 +543,8 @@ function feed(page, query) {
     ${topicPage ? topics : ""}
     ${topicPage && selectedTopics ? related.map(({ type, items }) => section(TYPES[type].title, items.length
       ? `<div class="panel">${items.map(item => itemRow(type, item)).join("")}</div>` : empty("当前主题下暂无相关研究。"))).join("") : ""}
-    ${topicPage ? section("相关帖子", results) : results}`;
+    ${topicPage ? section("相关帖子", results) : results}
+    ${!curated && !topicPage ? repostActivity(query) : ""}`;
 }
 
 function library(type) {
@@ -729,9 +750,9 @@ function sourceDetails(source) {
     <td class="${className}">${label}</td>
     <td>${stamp(source.lastSuccess || source.lastSuccessAt, "尚无成功记录")}</td>
     <td>${stamp(source.lastAttempt || source.lastChecked || source.checkedAt, "未知")}</td>
-    <td>${source.coverageStart && source.coverageEnd ? `${stamp(source.coverageStart)} 至 ${stamp(source.coverageEnd)}` : "待确认"}</td>
+    <td>${source.coverageStart && source.coverageEnd ? `${source.coverageMode === "free" ? "观察区间：" : ""}${stamp(source.coverageStart)} 至 ${stamp(source.coverageEnd)}` : "待确认"}${source.pageState ? `<br>${esc(source.pageState)}` : ""}</td>
     <td>${Number(source.postCount || 0)} 条采集${source.sampleCount ? ` / ${Number(source.sampleCount)} 条样本` : ""}</td>
-    <td>${esc(source.error?.message || source.error || source.message || "—")}</td>
+    <td>${esc(source.error?.message || source.error || source.message || (source.partialRead ? "本轮部分读取" : "—"))}${source.pendingCount ? `；待补 ${Number(source.pendingCount)} 条` : ""}</td>
   </tr>`;
 }
 
@@ -762,7 +783,7 @@ function admin() {
     ${section("运行状态", runtime)}
     ${section("精选设置", thresholdForm)}
     ${section("来源采集", sources.length
-      ? `<div class="panel table-wrap" tabindex="0" aria-label="来源采集状态"><table class="source-table"><thead><tr><th scope="col">账号</th><th scope="col">状态</th><th scope="col">最近成功读取</th><th scope="col">最近尝试</th><th scope="col">已核对范围</th><th scope="col">收录</th><th scope="col">备注</th></tr></thead>
+      ? `<div class="panel table-wrap" tabindex="0" aria-label="来源采集状态"><table class="source-table"><thead><tr><th scope="col">账号</th><th scope="col">状态</th><th scope="col">最近成功读取</th><th scope="col">最近尝试</th><th scope="col">范围 / 分页</th><th scope="col">收录</th><th scope="col">备注</th></tr></thead>
       <tbody>${sources.map(sourceDetails).join("")}</tbody></table></div>` : empty("当前没有来源状态。"))}
     ${section("最近研究任务", jobs.length
       ? `<div class="panel">${jobs.map(job => `<article class="list-row">

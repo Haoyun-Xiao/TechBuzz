@@ -16,13 +16,17 @@ async function loop(task, seconds) {
     await delay(remaining, null, {signal:controller.signal}).catch(() => {});
   }
 }
+let latestPosts;
+async function refreshSources() {
+  latestPosts = await syncResearch(db, sql);
+}
 async function runResearch() {
-  const posts = await syncResearch(db, sql);
+  if (!latestPosts) return;
   if (!process.env.TECHBUZZ_LLM_API_KEY || !process.env.TECHBUZZ_LLM_MODEL) return;
-  await analyze(db, posts);
+  await analyze(db, latestPosts);
 }
 try {
-  await loop(runResearch,60);
+  await Promise.all([loop(refreshSources, 60), loop(runResearch, 60)]);
 } finally {
   db.close();
   await closeDb();

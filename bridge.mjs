@@ -27,7 +27,7 @@ function fromMaterial(row) {
   // A rediscovered sample keeps richer verified context when the search response is partial.
   const native = !verified || row.fetched && post.text?.length >= (verified.text?.length ?? 0);
   const quoted = native ? nativeReference(post.quoted ?? { id: post.quoteId }, verified?.quoted) : verified.quoted;
-  const replyTo = native ? nativeReference({ id: post.replyTo, handle: post.replyToHandle }, verified?.replyTo) : verified.replyTo;
+  const replyTo = native ? nativeReference(post.replyContext ?? { id: post.replyTo, handle: post.replyToHandle }, verified?.replyTo) : verified.replyTo;
   const repostOf = native ? nativeReference(post.repostOf, verified?.repostOf) : verified.repostOf;
   const storedArticle = row.x_article?.text ? { ...row.x_article, url: row.url } : null;
   const article = storedArticle ?? verified?.article ?? null;
@@ -46,7 +46,7 @@ function fromMaterial(row) {
 }
 
 export async function syncResearch(db, sql) {
-  const [materials, sources] = await Promise.all([
+  const [materials, sources, activities] = await Promise.all([
     sql`
       SELECT a.source_id, a.url, a.published_at, a.discovered_at, a.x_post, a.x_article,
              a.raw->'techbuzzSample' AS verified,
@@ -62,18 +62,33 @@ export async function syncResearch(db, sql) {
         SELECT new_count FROM fetch_runs WHERE source_id = s.id AND status = 'ok' ORDER BY started_at DESC, id DESC LIMIT 1
       ) run ON true WHERE s.kind = 'x_search' AND s.id IN ${sql(sourceIds)}
     `,
+    sql`
+      SELECT source_id, tweet_id, kind, author, url, published_at, first_seen_at, last_seen_at, body
+      FROM x_account_activity WHERE source_id IN ${sql(sourceIds)} AND kind = 'repost'
+    `,
   ]);
   // The research cache is only replaced after a successful read of the full source set.
   if (sources.length !== sourceIds.length) throw new Error('The eight engine X sources are not seeded');
-  const projected = materials.map(fromMaterial);
+  // Search results must not attribute a third-party original to the monitored account.
+  const projected = materials.filter(row => typeof row.x_post.handle === 'string' &&
+    row.x_post.handle.replace(/^@/, '').toLowerCase() === sourceHandles.get(row.source_id)?.toLowerCase()).map(fromMaterial);
   const present = new Set(projected.map(post => post.id));
   const remove = db.prepare('DELETE FROM x_posts WHERE id = ?');
   const writeSource = db.prepare(`
     UPDATE x_sources SET coverage_start = ?, coverage_end = ?, last_success = ?,
-      last_attempt = ?, error = ?, last_count = ?, pending = ? WHERE handle = ?
+      last_attempt = ?, error = ?, last_count = ?, pending = ?, coverage_mode = ?, page_state = ?, partial_read = ?, pending_count = ? WHERE handle = ?
   `);
   db.exec('BEGIN IMMEDIATE');
   try {
+    db.exec('DELETE FROM x_activity');
+    const writeActivity = db.prepare(`INSERT INTO x_activity
+      (source_id, tweet_id, kind, author, url, published_at, first_seen_at, last_seen_at, body)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const activity of activities) {
+      writeActivity.run(activity.source_id, activity.tweet_id, activity.kind, activity.author,
+        activity.url, activity.published_at?.toISOString() ?? null,
+        activity.first_seen_at.toISOString(), activity.last_seen_at.toISOString(), activity.body);
+    }
     for (const row of db.prepare('SELECT id FROM x_posts').all()) {
       if (!present.has(row.id)) remove.run(row.id);
     }
@@ -81,11 +96,18 @@ export async function syncResearch(db, sql) {
       ingestPosts(db, projected.filter(post => post.sample === sample), { sample, retainEvidence: true });
     }
     for (const source of sources) {
+      const free = source.cursor?.xProvider !== 'socialdata' ? source.cursor?.freeX : null;
+      const errors = Array.isArray(free?.freeXBackfill?.errors) ? free.freeXBackfill.errors : [];
+      const detailFailures = Number(free?.freeXDetailFailures) || 0;
+      const pendingCount = Array.isArray(free?.freeXPending) ? free.freeXPending.length : 0;
       writeSource.run(
         source.cursor?.xCoverageStart ?? null, source.cursor?.xCoverageEnd ?? null,
         source.last_ok_at?.toISOString() ?? null, source.last_fetch_at?.toISOString() ?? null,
         source.enabled ? source.last_error : '来源已暂停',
         source.cursor?.xLastCount ?? source.new_count ?? null, source.cursor?.xWindow ? JSON.stringify(source.cursor.xWindow) : null,
+        (source.cursor?.freeX && source.cursor.xProvider !== 'socialdata') ? 'free' : 'socialdata',
+        free ? (free.backfillComplete ? '已到达公开分页边界' : '分页进行中') : null,
+        errors.length || detailFailures > 0 ? 1 : 0, pendingCount,
         sourceHandles.get(source.id),
       );
     }

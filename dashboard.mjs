@@ -30,8 +30,13 @@ export function dashboard(db, now = new Date()) {
   try {
     const rows = posts(db);
     const analysis = research(db);
+    const activity = db.prepare(`SELECT * FROM x_activity ORDER BY first_seen_at DESC`).all().map(row => ({
+      source: row.source_id.slice(2), tweetId: row.tweet_id, kind: row.kind,
+      author: row.author, url: row.url, publishedAt: row.published_at,
+      firstSeenAt: row.first_seen_at, lastSeenAt: row.last_seen_at, body: row.body,
+    }));
     return { ...analysis, name: 'TechBuzz', mode: 'live', generatedAt: now.toISOString(),
-      sources: sources(db), posts: rows, hot: rankEvents(rows, analysis.scores, now) };
+      sources: sources(db), posts: rows, activity, hot: rankEvents(rows, analysis.scores, now) };
   } finally {
     db.exec('COMMIT');
   }

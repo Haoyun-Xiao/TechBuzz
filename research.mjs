@@ -165,8 +165,8 @@ function packs(items, limit, sizeOf, maxCount = Infinity) {
   return groups;
 }
 
-function batches(items) {
-  return packs(items, POST_CONTEXT_LIMIT, ({ material }) => JSON.stringify(material).length, BATCH_SIZE);
+function batches(items, maxCount = BATCH_SIZE) {
+  return packs(items, POST_CONTEXT_LIMIT, ({ material }) => JSON.stringify(material).length, maxCount);
 }
 
 function transaction(db, write) {
@@ -603,7 +603,9 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
     const write = db.prepare(`INSERT INTO research_idea_inputs VALUES (?, ?)
       ON CONFLICT(post_id) DO UPDATE SET input_hash = excluded.input_hash`);
     const writeReceipt = db.prepare('INSERT OR REPLACE INTO research_idea_receipts (input_hash, value) VALUES (?, ?)');
-    for (const group of batches(pending)) {
+    // Idea responses include a complete thesis and validation criteria per result.
+    // Smaller batches keep both the reasoning and final JSON within the provider token budget.
+    for (const group of batches(pending, 4)) {
       const known = knownEntries(db);
       const existing = readEntries(db, 'ideas');
       const allowed = new Set(group.map(({ material }) => material.id));

@@ -1,59 +1,32 @@
 # TechBuzz
 
-科技股研究看板，跟踪八个 X 账号，把原帖、每日变化、基金投资研究假设和趋势证据放在同一页面。
-
-## 阅读演示
-
-[打开 TechBuzz 演示](https://haoyun-xiao.github.io/TechBuzz/)。首页呈现最新研究与日报；从 **Idea** 查看相关公司、作者观点、模型推断及证伪条件，从 **趋势** 按日期回看判断，再从证据链接到原帖。信息流支持账号和主题筛选。收藏保存在当前设备的浏览器。
-
-GitHub Pages 使用从本地数据库导出的静态快照。页面标示导出时间，公开帖子只提供短摘和来源链接。快照中的评分、Idea、趋势和日报由同一研究引擎运行生成。演示用的原链样本标记为样本，不用于证明整段时间内的采集完整性。
+科技股投研台跟踪八个 X 账号。默认首页使用研究看板；“资讯中心”进入原版引擎提供的动态、热点、编辑版日报和主题。研究评分、Idea、趋势和研究日报可以从首页直接打开。
 
 ## 本机运行
 
-需要 Docker Compose。将配置示例复制为本机配置，填写服务密钥后启动。
+需要 Docker Compose。已有本机配置时直接运行以下命令。
 
 ```sh
-cp .env.example .env
 docker compose up --build -d
 ```
 
-访问 <http://127.0.0.1:19282>。Compose 项目名为 `techbuzz`，服务为 `web` 和 `worker`，SQLite WAL 数据位于专属卷 `techbuzz_research-data`。可用 `docker compose down` 停止服务并保留数据。服务端仅绑定本机回环地址。
+新环境先将 `.env.example` 复制为 `.env`。为 PostgreSQL 密码、会话签名、图片签名、引擎后台密码和研究后台令牌各生成一个独立随机值（例如分别执行 `openssl rand -hex 32`）。配置 `TECHBUZZ_LLM_BASE_URL`、`TECHBUZZ_LLM_API_KEY`、`TECHBUZZ_LLM_MODEL` 和推理强度。自动发现新帖和回填需要单独的 `TECHBUZZ_SOCIALDATA_API_KEY`。密钥只放在本机。
 
-| 配置项 | 用途 |
-| --- | --- |
-| `TECHBUZZ_SOCIALDATA_API_KEY` | 八账号自动发现新帖及首次 30 天分页回填，按 SocialData 账户计费 |
-| `TECHBUZZ_LLM_BASE_URL`、`TECHBUZZ_LLM_MODEL`、`TECHBUZZ_LLM_API_KEY` | OpenAI 兼容模型。示例配置为 OpenCode Go 的 `deepseek-v4.1-flash` |
-| `TECHBUZZ_LLM_REASONING_EFFORT` | 推理强度，默认 `max` |
-| `TECHBUZZ_ADMIN_TOKEN` | 在后台更改 Idea 入选阈值的本机令牌，请自行生成随机值 |
-| `TECHBUZZ_PORT` | 本机网页端口，默认 19282 |
+打开 [投研台](http://127.0.0.1:19282/research/)、[资讯中心](http://127.0.0.1:19282/all)、[引擎管理](http://127.0.0.1:19282/admin) 或 [Agent 接入](http://127.0.0.1:19282/agent)。仅 web 在本机回环地址发布端口。运行 `docker compose down` 可停止此部署并保留数据卷。
 
-更改配置后执行 `docker compose up -d`。从后台查看每个账号的回填范围、检查状态以及最近一次研究更新。无 SocialData 密钥时仍可按已知公开原链导入样本；只有设好密钥后才能通过搜索自动发现新帖。
+## 数据来源与研究流程
 
-## 采集与研究
+- 固定账号为 @aleabitoreddit、@SemiAnalysis_、@Omercheema、@OrnnExchange、@HedgeyeTech、@RYANHINGSHING、@FredaDuan、@TMTLongShort。引用作者保留在上下文中。
+- `engine/` 基于本地 4c6e9e1 完整代码树。保留 PostgreSQL、pg-boss 队列、采集、内容处理、编辑评分、事件归组、出版、后台、RSS、OpenAPI、Agent Markdown 和 MCP。反馈和更新日志已移除。
+- 原版 worker 是自动抓取的唯一入口。配置了 SocialData 后，八个账号按五分钟周期调度，首次分页读取最近 30 天；原版默认每日 1,000 次请求，全日逐个账号每五分钟查一次需要至少 2,304 次。预算用尽会暂停请求，实际覆盖也受翻页和限流影响。来源状态显示实际成功时间和回填范围。
+- 研究 worker 从同一 PostgreSQL 读取帖子、来源状态和采集覆盖，投影到独立 SQLite 卷。已核验样本通过引擎原入库与处理队列导入。样本独立计数，不证明整段时间采集完整。
+- 编辑评分服务于原版精选和出版。研究评分按影响范围 35、信息增量 25、可验证性 25、跟踪价值 15 计算，Idea 默认门槛 70。趋势分析单独使用滚动 30 天证据，可保留低分反证。北京时间 08:00 后生成上一自然日研究日报，区别于引擎编辑版日报。
+- 研究页提供原帖及证据链接。只读接口包括 `/api/dashboard`、`/api/sources`、`/api/posts`、`/api/ideas`、`/api/trends`、`/api/reports`。原版公开接口位于 `/api/v1`、`/feed.xml`、`/openapi-v1.json` 和 `/api/mcp`。MCP 工具 `techbuzz_get_research` 支持 Idea、趋势和研究日报。
+- Compose 项目名为 `techbuzz`。卷 `engine-db` 存储引擎数据库，`engine-data` 存储引擎文件，`research-data` 存储研究数据库。旧原版和 A 股部署各自使用独立网络、端口和卷。
+- 模型和采集均在后台运行。无 SocialData 配置时，本地仍可查看原链样本和已经生成的研究。研究账号页面会显示采集错误。
 
-- 账号范围固定为 @aleabitoreddit、@SemiAnalysis_、@Omercheema、@OrnnExchange、@HedgeyeTech、@RYANHINGSHING、@FredaDuan、@TMTLongShort。引用和回复的第三方作者仅作为上下文。
-- 每五分钟检查增量，首次按账号回填最近 30 天，以帖子 ID 去重。源状态区分采集错误、正在回填和检查成功无新增。
-- 模型按影响范围 35、信息增量 25、可验证性 25、跟踪价值 15 打分。Idea 任务只接收通过阈值的新增研究材料，初始阈值为 70。
-- 趋势任务单独审阅滚动 30 天证据，包括低分反证。按日分批归纳再合并，同一时间可以维护多条线索；每次实质变化保留时间和引用。
-- 北京时间 08:00 后生成上一自然日的研究日报。后台任务使用任务指纹复用成功结果；失败原因和时间保存在本地。
-- `/api/dashboard` 为整页数据；`/api/posts`、`/api/sources`、`/api/ideas`、`/api/trends`、`/api/reports` 提供只读集合。集合下的 ID 路径返回单项。帖子及引用 ID 均使用字符串。后台阈值通过 `POST /api/admin/threshold` 设置，需要本机管理员 Bearer 令牌。
+## 本地快照
 
-## 重现演示与验证
+`demo/snapshot.json` 是已导出的研究快照。可用 `docker compose run --rm -v "$PWD/.runtime/site:/output" research node export.mjs /output` 从当前研究数据库重新导出，再在该目录启动静态文件服务。
 
-下列命令在**单独的演示数据库**导入示例原链，并依照帖子发布时间回放研究。回放与实时 worker 可使用不同数据库。首次运行回放需要真实模型密钥，会消耗模型额度。回放按北京时间顺序保存已完成日期，模型服务暂时失败时重跑相同命令即可从断点继续。
-
-```sh
-docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite worker node bootstrap.mjs
-docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite worker node replay.mjs
-mkdir -p .runtime/site
-docker compose run --rm -e TECHBUZZ_DB=/data/replay.sqlite -v "$PWD/.runtime/site:/output" worker node export.mjs /output
-docker compose run --rm worker npm test
-```
-
-`bootstrap.mjs` 也接受本项目八个账号的 X 帖子链接。样本和研究被导入真实库后即可从动态网页查看。公开静态站使用同一套前端与导出的 `snapshot.json`，无需配置密钥。仓库中的 `demo/snapshot.json` 保存本次发布的演示数据。
-
-## 实现与许可
-
-从本机上游提交 `4c6e9e1` 提取 X 采集逻辑，按八账号边界实现独立的 Node 服务、采集与研究 worker、前端及静态导出。研究评分、Idea/趋势双流程、证据链、回放和演示页面均位于本仓。复用部分的版权与许可见 [NOTICE](NOTICE) 和 [LICENSE](LICENSE)。
-
-回填范围表示搜索接口已遍历的时间窗口，公开搜索可能漏收帖子，原生转发的可检索期限也受服务端限制。参见 [SocialData 搜索说明](https://docs.socialdata.tools/reference/get-search-results/)。
+复用代码和字体的声明见 [第三方说明](THIRD_PARTY_NOTICES.md)。

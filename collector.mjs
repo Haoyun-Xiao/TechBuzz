@@ -143,7 +143,7 @@ function withoutQuotedLink(text, quotedId) {
 }
 
 /** Store normalized posts supplied by an explicitly verified source. No source cursor changes here. */
-export function ingestPosts(db, input, { sample = false, collectedAt = new Date().toISOString() } = {}) {
+export function ingestPosts(db, input, { sample = false, collectedAt = new Date().toISOString(), retainEvidence = false } = {}) {
   return atomic(db, () => {
     const existing = db.prepare('SELECT handle, sample, payload FROM x_posts WHERE id = ?');
     const write = db.prepare(`
@@ -158,17 +158,18 @@ export function ingestPosts(db, input, { sample = false, collectedAt = new Date(
       const publishedAt = timestamp(record.publishedAt);
       if (!handle || !id || !publishedAt) continue;
       const prior = existing.get(id);
-      if (prior && (prior.handle !== handle || (!prior.sample && sample))) continue;
+      if (prior && (prior.handle !== handle || (!retainEvidence && !prior.sample && sample))) continue;
       const previous = prior ? JSON.parse(prior.payload) : null;
       const recordText = record.text ?? '';
       const post = {
-        ...record, id, handle, publishedAt, sample, collectedAt: previous?.collectedAt ?? collectedAt, url: postUrl(id, handle),
-        text: recordText, media: record.media ?? [], article: record.article ?? previous?.article ?? null,
+        ...record, id, handle, publishedAt, sample, collectedAt: retainEvidence ? record.collectedAt : previous?.collectedAt ?? collectedAt,
+        url: retainEvidence ? record.url : postUrl(id, handle),
+        text: recordText, media: record.media ?? [], article: record.article ?? (retainEvidence ? null : previous?.article ?? null),
         quoted: record.quoted ?? null, replyTo: record.replyTo ?? null, repostOf: record.repostOf ?? null,
         kind: record.kind ?? 'original', contextStatus: record.contextStatus ?? 'complete',
       };
       // A later lookup can be sparse. Keep previously observed context for the same target.
-      for (const key of ['quoted', 'replyTo', 'repostOf']) {
+      for (const key of retainEvidence ? [] : ['quoted', 'replyTo', 'repostOf']) {
         if (post[key]?.id === previous?.[key]?.id && post[key]?.text == null && previous?.[key]?.text != null) {
           post[key] = previous[key];
         }

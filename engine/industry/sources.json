@@ -1,0 +1,156 @@
+{
+  "sources": [
+    {
+      "id": "x-aleabitoreddit",
+      "name": "@aleabitoreddit",
+      "kind": "x_search",
+      "config": {
+        "query": "from:aleabitoreddit",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-semianalysis_",
+      "name": "@SemiAnalysis_",
+      "kind": "x_search",
+      "config": {
+        "query": "from:SemiAnalysis_",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-omercheema",
+      "name": "@Omercheema",
+      "kind": "x_search",
+      "config": {
+        "query": "from:Omercheema",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-ornnexchange",
+      "name": "@OrnnExchange",
+      "kind": "x_search",
+      "config": {
+        "query": "from:OrnnExchange",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-hedgeyetech",
+      "name": "@HedgeyeTech",
+      "kind": "x_search",
+      "config": {
+        "query": "from:HedgeyeTech",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-ryanhingshing",
+      "name": "@RYANHINGSHING",
+      "kind": "x_search",
+      "config": {
+        "query": "from:RYANHINGSHING",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-fredaduan",
+      "name": "@FredaDuan",
+      "kind": "x_search",
+      "config": {
+        "query": "from:FredaDuan",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    },
+    {
+      "id": "x-tmtlongshort",
+      "name": "@TMTLongShort",
+      "kind": "x_search",
+      "config": {
+        "query": "from:TMTLongShort",
+        "searchType": "Latest",
+        "_techbuzz": {
+          "fixedInterval": true,
+          "initialBackfillDays": 30
+        }
+      },
+      "tier": "T2",
+      "participation_mode": "editorial",
+      "interval_minutes": 5,
+      "site_fulltext": false,
+      "syndicate_fulltext": false,
+      "enabled": true
+    }
+  ]
+}

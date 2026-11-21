@@ -6,3 +6,6 @@ PLAN.md
 node_modules
 *.sqlite*
 .github
+
+engine/
+demo/

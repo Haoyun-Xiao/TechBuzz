@@ -1,0 +1,12 @@
+{
+  "name": "@techbuzz/contracts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*.ts"
+  },
+  "dependencies": {
+    "@techbuzz/industry": "*",
+    "@techbuzz/site": "*"
+  }
+}

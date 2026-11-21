@@ -5,5 +5,5 @@
   "type": "module",
   "description": "TechBuzz 科技股研究看板",
   "engines": { "node": ">=24" },
-  "scripts": { "start": "node server.mjs", "worker": "node worker.mjs", "test": "node --test", "snapshot": "node export.mjs" }
+  "scripts": { "start": "node server.mjs", "worker": "node worker.mjs", "test": "node --test *.test.mjs", "snapshot": "node export.mjs" }
 }

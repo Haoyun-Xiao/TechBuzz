@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /api/v1/
+Allow: /api/mcp
+Disallow: /api/
+Disallow: /admin/
+Disallow: /starred
+
+Sitemap: {{siteUrl}}/sitemap.xml

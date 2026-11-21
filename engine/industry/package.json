@@ -1,0 +1,8 @@
+{
+  "name": "@techbuzz/industry",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./*.ts"
+  }
+}

@@ -1,33 +1,120 @@
 name: techbuzz
-x-app: &app
-  image: techbuzz:local
-  build: .
-  init: true
+x-engine: &engine
+  build: ./engine
+  pull_policy: never
+  image: techbuzz-engine:local
   restart: unless-stopped
+x-env: &engine-env
+  NODE_ENV: production
+  DATABASE_URL: postgres://techbuzz:${TECHBUZZ_PG_PASSWORD:?set TECHBUZZ_PG_PASSWORD}@db:5432/techbuzz
+  SITE_URL: http://127.0.0.1:${TECHBUZZ_PORT:-19282}
+  TECHBUZZ_DATA_DIR: /data
+  SESSION_SECRET: ${TECHBUZZ_SESSION_SECRET:?set TECHBUZZ_SESSION_SECRET}
+  IMG_PROXY_SIGN_SECRET: ${TECHBUZZ_IMAGE_SECRET:?set TECHBUZZ_IMAGE_SECRET}
+  ADMIN_PASSWORD: ${TECHBUZZ_ENGINE_ADMIN_PASSWORD:?set TECHBUZZ_ENGINE_ADMIN_PASSWORD}
+  SOCIALDATA_API_KEY: ${TECHBUZZ_SOCIALDATA_API_KEY:-}
+  COLLECT_ENABLED: "true"
+  MODEL_CALLS_ENABLED: "true"
+  LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
+  LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
+  LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:-}
+  LLM_EXTRA_JSON: '{"reasoning_effort":"${TECHBUZZ_LLM_REASONING_EFFORT:-max}"}'
+  LLM_REASONING_TOKENS: "16384"
+x-research-runtime: &research-runtime
+  <<: *engine
+  init: true
+  environment:
+    <<: *engine-env
+    TECHBUZZ_DB: /research-data/techbuzz.sqlite
+    TECHBUZZ_LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:-}
+    TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
+    TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
+    TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
   volumes:
-    - research-data:/data
+    - research-data:/research-data
+    - ./bridge.mjs:/app/research/bridge.mjs:ro
+    - ./bridge-import.mjs:/app/research/bridge-import.mjs:ro
+    - ./db.mjs:/app/research/db.mjs:ro
+    - ./collector.mjs:/app/research/collector.mjs:ro
+    - ./research.mjs:/app/research/research.mjs:ro
+    - ./worker.mjs:/app/research/worker.mjs:ro
+    - ./bootstrap.mjs:/app/research/bootstrap.mjs:ro
+    - ./demo/snapshot.json:/app/research/demo/snapshot.json:ro
+    - engine-data:/data
 services:
-  web:
-    <<: *app
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: techbuzz
+      POSTGRES_USER: techbuzz
+      POSTGRES_PASSWORD: ${TECHBUZZ_PG_PASSWORD}
+    volumes: [engine-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U techbuzz -d techbuzz"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+  setup:
+    <<: *engine
+    restart: "no"
+    environment: *engine-env
+    volumes: [engine-data:/data]
+    depends_on:
+      db: {condition: service_healthy}
+    command: ["sh","-ec","node scripts/migrate.ts && node scripts/seed.ts"]
+  api:
+    <<: *engine
+    environment:
+      <<: *engine-env
+      TECHBUZZ_RESEARCH_URL: http://research:3000
+      API_HOST: 0.0.0.0
+      API_PORT: "3001"
+    volumes: [engine-data:/data]
+    depends_on:
+      setup: {condition: service_completed_successfully}
+    command: ["node","apps/api/src/main.ts"]
+  worker:
+    <<: *engine
+    environment: *engine-env
+    volumes: [engine-data:/data]
+    depends_on:
+      research-import: {condition: service_completed_successfully}
+    command: ["node","apps/worker/src/main.ts"]
+    stop_grace_period: 515s
+  research:
+    image: techbuzz-research:local
+    build: .
+    init: true
+    restart: unless-stopped
     environment:
       TECHBUZZ_ADMIN_TOKEN: ${TECHBUZZ_ADMIN_TOKEN:-}
-    ports:
-      - "127.0.0.1:${TECHBUZZ_PORT:-19282}:3000"
-    healthcheck:
-      test: ["CMD","node","-e","fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 20s
-      timeout: 5s
-      retries: 3
-  worker:
-    <<: *app
-    command: ["node","worker.mjs"]
+    volumes: [research-data:/data]
+  research-import:
+    <<: *research-runtime
+    restart: "no"
+    depends_on:
+      setup: {condition: service_completed_successfully}
+    command: ["node","research/bridge-import.mjs","research/demo/snapshot.json"]
+  research-worker:
+    init: true
+    <<: *research-runtime
+    depends_on:
+      research-import: {condition: service_completed_successfully}
+    command: ["sh","-ec","exec node research/worker.mjs"]
+  web:
+    <<: *engine
     environment:
-      TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
-      TECHBUZZ_LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:-}
-      TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
-      TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
-      TECHBUZZ_SOCIALDATA_API_KEY: ${TECHBUZZ_SOCIALDATA_API_KEY:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+      NODE_ENV: production
+      SITE_URL: http://127.0.0.1:${TECHBUZZ_PORT:-19282}
+      API_BASE_URL: http://api:3001
+      TECHBUZZ_RESEARCH_URL: http://research:3000
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: "3000"
+    depends_on: [api, research]
+    ports: ["127.0.0.1:${TECHBUZZ_PORT:-19282}:3000"]
+    command: ["node","apps/web/server.ts"]
 volumes:
+  engine-db:
+  engine-data:
   research-data:

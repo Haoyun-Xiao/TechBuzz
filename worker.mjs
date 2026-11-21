@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { openDatabase } from './db.mjs';
-import { collect, posts } from './collector.mjs';
+import { closeDb, sql } from '@techbuzz/backend/db';
+import { syncResearch } from './bridge.mjs';
 import { analyze } from './research.mjs';
 
 const db = openDatabase();
@@ -15,10 +16,14 @@ async function loop(task, seconds) {
     await delay(remaining, null, {signal:controller.signal}).catch(() => {});
   }
 }
-async function collectSources() { await collect(db); }
-async function runAnalysis() {
+async function runResearch() {
+  const posts = await syncResearch(db, sql);
   if (!process.env.TECHBUZZ_LLM_API_KEY || !process.env.TECHBUZZ_LLM_MODEL) return;
-  await analyze(db, posts(db));
+  await analyze(db, posts);
 }
-await Promise.all([loop(collectSources,300),loop(runAnalysis,60)]);
-db.close();
+try {
+  await loop(runResearch,60);
+} finally {
+  db.close();
+  await closeDb();
+}

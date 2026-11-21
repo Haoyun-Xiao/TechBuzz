@@ -177,6 +177,7 @@ async function loadData(manual = false) {
     try {
       payload = validate(await readJSON("./api/dashboard", { signal: AbortSignal.timeout(9000) }));
       live = payload.mode !== "snapshot";
+      document.getElementById("engine-home").hidden = !live;
     } catch {
       payload = validate(await readJSON("./snapshot.json", { signal: AbortSignal.timeout(9000) }));
       live = false;
@@ -704,7 +705,7 @@ function agent(query) {
   const type = types.includes(query.get("type")) ? query.get("type") : "reports";
   const items = byNewest(list(payload[type]));
   const item = items.find(entry => String(entry.id) === query.get("item"));
-  const paths = live ? ["api/dashboard", "api/posts", "api/sources", "api/reports", "api/ideas", "api/trends"] : ["snapshot.json"];
+  const paths = live ? ["/agent", "/openapi-v1.json", "/feed.xml", "api/dashboard", "api/posts", "api/sources", "api/reports", "api/ideas", "api/trends"] : ["snapshot.json"];
   return `<div class="narrow">${heading("Agent 接入", "将研究摘要、证据链接和待核对问题交给你的 Agent。")}
     <section class="panel panel-body">
       <h2>研究上下文</h2>
@@ -716,7 +717,7 @@ function agent(query) {
       <div class="actions"><button class="button primary" type="button" data-action="copy">复制上下文</button><button class="button" type="button" data-action="download">下载 Markdown</button></div>
     </section>
     ${section("机器可读数据", `<div class="panel panel-body"><p>${live ? "以下 JSON 接口无需管理令牌，可供 Agent 读取。" : "当前页面使用公开快照。Agent 可读取以下 JSON 文件。"}</p>
-      <ul class="endpoint-list">${paths.map(path => `<li><a href="./${path}"><code>/${path}</code></a></li>`).join("")}</ul></div>`)}
+      <ul class="endpoint-list">${paths.map(path => `<li><a href="${path.startsWith("/") ? path : "./" + path}"><code>${path.startsWith("/") ? path : "/" + path}</code></a></li>`).join("")}</ul></div>`)}
   </div>`;
 }
 

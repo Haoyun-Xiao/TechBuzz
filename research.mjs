@@ -1,3 +1,6 @@
+import { setTimeout as delay } from 'node:timers/promises';
+import { Readable } from 'node:stream';
+import { createInterface } from 'node:readline';
 import { createHash, randomUUID } from 'node:crypto';
 
 const HOUR = 3_600_000;
@@ -286,6 +289,34 @@ export function research(db) {
   };
 }
 
+// Ignore reasoning deltas. A disconnected stream must never publish a partial JSON object.
+export async function readCompletion(response) {
+  if (!response.headers.get('content-type')?.includes('text/event-stream')) return response.json();
+  const stream = Readable.fromWeb(response.body);
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  const content = [];
+  let model, finish;
+  try {
+    for await (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') break;
+      if (!data) continue;
+      const chunk = JSON.parse(data);
+      if (chunk.error) throw new Error('模型流返回错误', { cause: {code:'STREAM_INTERRUPTED'} });
+      model = chunk.model || model;
+      const choice = chunk.choices?.[0];
+      if (typeof choice?.delta?.content === 'string') content.push(choice.delta.content);
+      if (choice?.finish_reason) finish = choice.finish_reason;
+    }
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+  if (!finish) throw new Error('模型响应中断', { cause: {code:'STREAM_INTERRUPTED'} });
+  return {model, choices:[{finish_reason:finish, message:{content:content.join('')}}]};
+}
+
 function modelClient(db, options) {
   const model = options.model ?? (options.complete ? 'injected' : process.env.TECHBUZZ_LLM_MODEL ?? '');
   const reasoningEffort = process.env.TECHBUZZ_LLM_REASONING_EFFORT || 'max';
@@ -307,7 +338,9 @@ function modelClient(db, options) {
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
       if (endpoint.hostname === 'opencode.ai') headers['x-opencode-session'] = `ses_${session}-${kind.startsWith('trend') ? 'trends' : kind}`;
       const budgets = kind === 'trends' ? [32_768, 49_152] : [16_384, 32_768];
-      for (const maxTokens of budgets) {
+      let retryCount = 0;
+      for (let budget = 0; budget < budgets.length;) {
+        const maxTokens = budgets[budget];
         const calledAt = new Date().toISOString();
         let actualModel = model;
         let outcome = 'failed';
@@ -315,24 +348,38 @@ function modelClient(db, options) {
           const response = await fetch(endpoint, {
             method: 'POST', headers,
             body: JSON.stringify({
-              model, response_format: { type: 'json_object' },
+              model, stream: true, response_format: { type: 'json_object' },
               reasoning_effort: reasoningEffort, max_tokens: maxTokens,
               messages: [{ role: 'system', content: system }, { role: 'user', content: JSON.stringify(input) }],
             }),
             signal: AbortSignal.timeout(360_000),
           });
-          if (!response.ok) throw new Error(`模型 HTTP ${response.status}`);
-          const data = await response.json();
+          if (!response.ok) {
+            await response.body?.cancel();
+            throw Object.assign(new Error(`模型 HTTP ${response.status}`), {status:response.status});
+          }
+          const data = await readCompletion(response);
           actualModel = clean(data?.model, 160) || model;
           models.set(kind, actualModel);
           const choice = data.choices?.[0];
           if (choice?.finish_reason === 'length') {
             outcome = 'truncated';
+            budget++;
             continue;
           }
           if (typeof choice?.message?.content !== 'string' || !choice.message.content.trim()) throw new Error('模型响应没有正文');
           outcome = 'completed';
           return choice.message.content;
+        } catch (error) {
+          const code = error.cause?.code ?? error.code;
+          const transient = error.name === 'TimeoutError' || error instanceof TypeError || code === 'STREAM_INTERRUPTED'
+            || typeof code === 'string' && /^(UND_ERR_|ECONN|ETIMEDOUT|EAI_AGAIN)/.test(code)
+            || [408,429,500,502,503,504].includes(error.status);
+          if (!transient) throw error;
+          if (retryCount >= 2) throw new Error(`模型请求连续中断：${code ?? error.status ?? error.name}`, {cause:error});
+          retryCount++;
+          outcome = 'retrying';
+          await delay(retryCount * 2000);
         } finally {
           saveCall.run(kind, actualModel, reasoningEffort, outcome, calledAt);
         }
@@ -881,11 +928,11 @@ export async function analyze(db, posts, options = {}) {
   const operation = (prior ?? Promise.resolve()).catch(() => {}).then(async () => {
     const client = modelClient(db, options);
     const scored = await scorePosts(db, client, knownPosts(posts, now), now);
-    const trackResearch = async () => {
-      if (scored.complete) await makeIdeas(db, client, scored.units, scored.rootIds, now, settings(db));
-      await makeTrends(db, client, scored.rows, now);
-    };
-    await Promise.all([trackResearch(), makeReport(db, client, scored.rows, now)]);
+    await Promise.all([
+      scored.complete && makeIdeas(db, client, scored.units, scored.rootIds, now, settings(db)),
+      makeTrends(db, client, scored.rows, now),
+      makeReport(db, client, scored.rows, now),
+    ]);
     return research(db);
   });
   running.set(key, operation);

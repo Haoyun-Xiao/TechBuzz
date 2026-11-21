@@ -198,7 +198,7 @@ export function ResearchSources({ data }: { data: Dashboard }) {
         覆盖 {stamp(source.coverageStart)} 至 {stamp(source.coverageEnd)} · 采集 {source.postCount ?? 0} 条 · 样本 {source.sampleCount ?? 0} 条 · 待处理 {source.pendingCount ?? 0} 条 · 不可读 {source.unavailableCount ?? 0} 条
       </p>
       {(source.error || source.message || source.pageState) && <p className="mt-1 text-[13px] text-ink-4">
-        {typeof source.error === "object" ? source.error.message : source.error || source.message || source.pageState}
+        {(typeof source.error === "object" ? source.error?.message : source.error) || source.message || source.pageState}
       </p>}
     </article>)}
     {!data.sources.length && <EmptyState title="当前没有关注来源" />}

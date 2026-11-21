@@ -44,11 +44,14 @@ test("research pages preserve the scored selection, frozen activity pages and si
     const activities = refreshed ? [late, ...base] : base;
     return { activities, featured: activities.filter((item) => item.featured), posts: activities.map((item) => item.post), ideas: [], trends: [], reports,
       scores: Object.fromEntries(activities.filter((item) => item.featured).map((item) => [item.postId, { score: item.score }])),
-      hot: [], singleHot: [], topics: [], sources: [{ handle: "Author" }, { handle: "Curve" }], threshold: 70,
+      hot: [], singleHot: [], topics: [], sources: [{ handle: "Author", error: null, pageState: "分页进行中" }, { handle: "Curve" }], threshold: 70,
       generation: { ideas: { status: "completed" }, trends: { status: "running" }, report: { status: "completed" } }, generatedAt: refreshed ? after : before };
   });
   const live = await startWebServer(researchApi, { TECHBUZZ_RESEARCH_URL: "http://127.0.0.1:1" });
   try {
+    const sources = await fetch(`${live.origin}/sources`);
+    assert.equal(sources.status, 200, live.logs());
+    assert.match(cheerio.load(await sources.text())("main").text(), /分页进行中/);
     const home = await fetch(live.origin);
     assert.equal(home.status, 200, live.logs());
     let $ = cheerio.load(await home.text());

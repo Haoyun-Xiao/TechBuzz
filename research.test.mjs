@@ -363,3 +363,13 @@ test('旧 Idea 的串内引用只合并当前证据，保留历史原帖 ID', as
   assert.equal(db.prepare('SELECT COUNT(*) AS total FROM research_scores').get().total, 2);
   db.close();
 });
+
+test('streamed completions retain final text across chunks and reject interrupted results', async () => {
+  const {readCompletion} = await import('./research.mjs');
+  const stream = (...rows) => new Response(rows.map(row => 'data: '+JSON.stringify(row)+'\n\n').join(''),{headers:{'content-type':'text/event-stream'}});
+  const partial = {choices:[{delta:{content:'{"ok":'}}]};
+  const done = {choices:[{delta:{content:'true}'},finish_reason:'stop'}]};
+  const data = await readCompletion(stream({choices:[{delta:{reasoning_content:'analysis'}}]},partial,done));
+  assert.equal(data.choices[0].message.content,'{"ok":true}');
+  await assert.rejects(readCompletion(stream(partial)),/响应中断/);
+});

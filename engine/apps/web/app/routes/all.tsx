@@ -1,3 +1,4 @@
+import { Research } from "../features/research/Research";
 import { useEffect } from "react";
 import { Link, redirect, useLoaderData, useNavigation, useSearchParams } from "react-router";
 import type { Route } from "./+types/all";
@@ -36,7 +37,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   );
   // Past the last page of what there is: the last page, with the same search and filters.
   if (data.total > 0 && data.page > data.pageCount) throw redirect(pageHref(url.searchParams, data.pageCount));
-  return cachedPage(60, { data });
+  return cachedPage(60, { researchEnabled: !!process.env.TECHBUZZ_RESEARCH_URL, data });
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -70,7 +71,7 @@ function pageHref(params: URLSearchParams, page: number) {
 }
 
 export default function AllPage() {
-  const { data } = useLoaderData<typeof loader>();
+  const { researchEnabled, data } = useLoaderData<typeof loader>();
   const [params] = useSearchParams();
   const navigation = useNavigation();
   const f = data.filters;
@@ -137,6 +138,7 @@ export default function AllPage() {
         </div>
       )}
 
+      {researchEnabled && data.page === 1 && !hasFeedFilters(f) && <details open className="mb-6"><summary className="cursor-pointer text-[17px] font-semibold text-ink">八账号研究动态</summary><Research initial="feed" embedded /></details>}
       <div className={`transition-opacity duration-200 ${busy ? "opacity-50" : ""}`}>
         {data.items.length === 0 ? (
           <div className="mt-2 lg:card">

@@ -152,7 +152,7 @@ code { font-size: .9em; overflow-wrap: anywhere; }
 }
 .filters label, .form-grid label { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted); flex: 1 1 115px; }
 .filters label.search-field { flex-grow: 1.5; }
-.filters input, .filters select, .form-grid input, .form-grid select, .agent-output {
+.filters input, .filters select, .form-grid input, .form-grid select {
   width: 100%; min-width: 0; border: 1px solid #b9c9c3; border-radius: 5px;
   color: var(--ink); background: var(--paper); padding: 6px 9px; min-height: 35px;
 }
@@ -211,7 +211,6 @@ code { font-size: .9em; overflow-wrap: anywhere; }
 .topic-grid .tags { margin-top: 10px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 11px; }
 .form-grid .actions { grid-column: 1 / -1; }
-.agent-output { margin-top: 12px; min-height: 240px; resize: vertical; line-height: 1.55; font-size: 13px; }
 .endpoint-list { display: flex; flex-wrap: wrap; gap: 8px 15px; margin: 10px 0 0; padding: 0; list-style: none; }
 .endpoint-list a { color: var(--green); text-decoration: underline; text-underline-offset: 3px; }
 .table-wrap { overflow-x: auto; }
@@ -254,7 +253,6 @@ code { font-size: .9em; overflow-wrap: anywhere; }
   .lead, .detail-head, .panel-body { padding: 17px; }
   .post { padding: 14px; }
   .filters { padding: 11px; }
-  .agent-output { min-height: 190px; }
   .footer-inner { font-size: 11px; }
 }
 

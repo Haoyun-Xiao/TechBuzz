@@ -143,14 +143,11 @@ async function handle(req: import("node:http").IncomingMessage, res: import("nod
   const pathname = qi >= 0 ? raw.slice(0, qi) : raw;
   const search = qi >= 0 ? raw.slice(qi) : "";
 
-  if (pathname === "/research" || (pathname === "/" && !search && process.env.TECHBUZZ_RESEARCH_URL)) {
-    res.writeHead(302, { Location: "/research/" + search, "Cache-Control": "no-store" });
-    return res.end();
-  }
+  // Research pages use the same React shell as the feed. Only the JSON API lives in the research service.
   const research = process.env.TECHBUZZ_RESEARCH_URL;
-  const legacyResearchApi = /^\/api\/(?:dashboard|admin\/threshold|(?:sources|posts|ideas|trends|reports)(?:\/[^/]+)?)$/.test(pathname);
-  if (research && (pathname.startsWith("/research/") || legacyResearchApi)) {
-    if (!legacyResearchApi) req.url = pathname.slice("/research".length) + search;
+  const apiPath = pathname.startsWith("/research/api/") ? pathname.slice("/research".length) : pathname;
+  if (research && /^\/api\/(?:dashboard|admin\/threshold|(?:sources|posts|ideas|trends|reports)(?:\/[^/]+)?)$/.test(apiPath)) {
+    req.url = apiPath + search;
     return proxyToApi(req, res, {}, new URL(research));
   }
 

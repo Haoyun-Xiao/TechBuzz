@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { fetchFreeX } from "../packages/backend/src/sources/free-x.ts";
 
@@ -67,7 +67,7 @@ test("30-day boundary ignores pinned and repost anchors and falls back from chal
     fallback++;
     if (u.pathname.endsWith("/rss")) return new Response("<rss><channel></channel></rss>");
     if (u.search) { continued++; return new Response(page(item("Alice", old))); }
-    return new Response(page(item("Alice", old, '<div class="pinned"></div>') + item("Bob", old, '<div class="retweet-header"></div>') + item("Alice", recent), "next"));
+    return new Response(page(item("Alice", old, '<div class="pinned"></div>') + item("Bob", old, '<div class="retweet-header"></div>') + item("Alice", old) + item("Alice", recent), "next"));
   }) as typeof fetch;
   try {
     const r = await fetchFreeX("Alice", {});
@@ -78,4 +78,169 @@ test("30-day boundary ignores pinned and repost anchors and falls back from chal
     assert.equal(continued, 2);
     assert.ok(fallback > 0);
   } finally { globalThis.fetch = original; }
+});
+
+test("free detail retries preserve their schedule and use complete thread statuses directly", async (t) => {
+  const created_at = new Date().toISOString();
+  const tweet = (id: string, text: string) => ({ id, text, created_at, replies: 0, author: { screen_name: "Alice" } });
+  const lookedUp: string[] = [];
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    const url = new URL(input), id = url.pathname.split("/").at(-1)!;
+    if (url.hostname === "api.fxtwitter.com") {
+      if (url.pathname.startsWith("/2/thread/")) return Response.json({ status: tweet(id, "parent"), thread: [tweet("11", "public sibling")] });
+      lookedUp.push(id);
+      return Response.json({ tweet: { ...tweet(id, "parent"), replies: 1 } });
+    }
+    if (url.pathname.endsWith("/rss")) return new Response("unavailable", { status: 503 });
+    return new Response('<div class="timeline"></div>');
+  });
+  const result = await fetchFreeX("Alice", { freeXPending: [
+    { id: "10", author: "Alice", repost: false }, { id: "12", author: "Alice", repost: false, retryAt: Date.now() + 60_000 },
+  ] });
+  assert.deepEqual(lookedUp, ["10"]);
+  assert.deepEqual(result.items.map((x) => x.identityKey), ["x:10", "x:11"]);
+  assert.deepEqual(result.cursor.freeXPending.map((x: any) => x.id), ["12"]);
+  assert.deepEqual(result.cursor.freeXBackfill.errors, []);
+});
+
+test("repeated missing statuses are counted separately from deferred or transient reads", async (t) => {
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    const url = new URL(input);
+    if (url.pathname.endsWith("/status/20") || url.pathname.endsWith("/thread/20")) return new Response("missing", { status: 404 });
+    if (url.hostname === "api.fxtwitter.com") return new Response("unavailable", { status: 503 });
+    if (url.pathname.endsWith("/rss")) return new Response("<rss><channel></channel></rss>");
+    return new Response('<div class="timeline"></div>');
+  });
+  const result = await fetchFreeX("Alice", { freeXPending: [
+    { id: "20", author: "Alice", repost: false, attempts: 2, missing: 2 },
+    { id: "21", author: "Alice", repost: false, attempts: 2, missing: 2 },
+  ] });
+  assert.deepEqual(result.cursor.freeXUnavailable, [{ id: "20", author: "Alice", repost: false, reason: "not_found" }]);
+  assert.equal(result.cursor.freeXPending[0]?.id, "21");
+  assert.equal(result.cursor.freeXPending[0]?.missing, 0);
+  assert.equal(result.cursor.freeXDetailFailures, 1);
+});
+
+const page = (ids: string[], next?: string) => new Response(`<div class="timeline">${ids.map((id) => `<div class="timeline-item"><a class="tweet-link" href="/Alice/status/${id}"></a></div>`).join("")}${next ? `<div class="show-more"><a href="?cursor=${next}">more</a></div>` : ""}</div>`);
+const snowflake = (when: number) => String((BigInt(when) - 1288834974657n) << 22n);
+const completed = { profile: null, replies: null };
+const itemIds = (result: Awaited<ReturnType<typeof fetchFreeX>>) => result.items.map((item) => item.xPost!.tweetId);
+
+function mockTimeline(t: TestContext, timeline: (url: URL) => Response) {
+  t.mock.method(globalThis, "fetch", async (input: string) => {
+    const url = new URL(input), id = url.pathname.split("/").at(-1)!;
+    if (url.hostname === "api.fxtwitter.com") {
+      const timestamp = id.length >= 18 ? Number((BigInt(id) >> 22n) + 1288834974657n) : Date.now();
+      return Response.json({ tweet: { id, text: `post ${id}`, replies: 0, created_at: new Date(timestamp).toISOString(), author: { screen_name: "Alice" } } });
+    }
+    if (url.pathname.endsWith("/rss")) return new Response("<rss><channel></channel></rss>");
+    return timeline(url);
+  });
+}
+
+test("an old page followed by new posts does not stop history, and consecutive boundary pages survive a restart", async (t) => {
+  const day = 86_400_000;
+  const fresh = snowflake(Date.now() - day), missed = snowflake(Date.now() - 4 * day);
+  const old = [31, 32, 33].map((days) => snowflake(Date.now() - days * day));
+  const checked: string[] = [];
+  mockTimeline(t, (url) => {
+    const cursor = url.searchParams.get("cursor");
+    if (cursor) checked.push(cursor);
+    switch (cursor) {
+      case null: return page([fresh], "out-of-order");
+      case "out-of-order": return page([old[0]!], "gap");
+      case "gap": return page([missed], "older");
+      case "older": return page([old[1]!], "boundary");
+      case "boundary": return page([old[2]!], "past-boundary");
+      default: throw new Error(`Unexpected cursor ${cursor}`);
+    }
+  });
+  const a = await fetchFreeX("Alice", {});
+  assert.deepEqual(itemIds(a), [fresh, missed]);
+  assert.deepEqual(a.cursor.freeXPages, { profile: "boundary", replies: "boundary" });
+  const b = await fetchFreeX("Alice", JSON.parse(JSON.stringify(a.cursor)));
+  assert.deepEqual(itemIds(b), []);
+  assert.equal(b.cursor.backfillComplete, true);
+  assert.equal(checked.filter((cursor) => cursor === "boundary").length, 2);
+  assert.ok(!checked.includes("past-boundary"));
+});
+
+test("completed legacy cursors get a bounded alternate-mirror rescan, without delaying or duplicating new posts", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-21T00:00:00Z") });
+  let live = ["101", "100"];
+  const alternateReads: Array<string | null> = [];
+  mockTimeline(t, (url) => {
+    if (url.hostname !== "xitter.cf") return page(live, "live");
+    const cursor = url.searchParams.get("cursor");
+    alternateReads.push(cursor);
+    if (!cursor) return page(["101", "100"], "cached-gap");
+    if (cursor === "cached-gap") return page(["99", "98"], "verified-tail");
+    return page(["97"]);
+  });
+  const old = { freeXSeen: ["a:101", "a:100", "a:99", "a:97"], freeXPages: completed, backfillComplete: true };
+  const migrated = await fetchFreeX("Alice", old);
+  assert.equal(migrated.cursor.backfillComplete, true);
+  assert.equal(alternateReads.length, 0);
+  t.mock.timers.tick(5 * 60_000);
+  live = ["102", "101", "100"];
+  const incremental = await fetchFreeX("Alice", migrated.cursor);
+  assert.deepEqual(itemIds(incremental), ["102"]);
+  assert.equal(alternateReads.length, 0);
+  t.mock.timers.tick(6 * 60 * 60_000);
+  live = ["103", "102", "101"];
+  const repaired = await fetchFreeX("Alice", incremental.cursor);
+  assert.deepEqual(itemIds(repaired), ["103", "98"]);
+  assert.equal(repaired.cursor.backfillComplete, true);
+  assert.equal(alternateReads.filter((cursor) => cursor === "cached-gap").length, 2);
+  assert.ok(!alternateReads.includes("verified-tail"));
+  t.mock.timers.tick(5 * 60_000);
+  const continued = await fetchFreeX("Alice", repaired.cursor);
+  assert.deepEqual(itemIds(continued), []);
+  assert.equal(alternateReads.filter((cursor) => cursor === "verified-tail").length, 2);
+  t.mock.timers.tick(5 * 60_000);
+  await fetchFreeX("Alice", continued.cursor);
+  assert.equal(alternateReads.length, 6);
+});
+
+test("a stale historical cursor switches mirror and recovers without blocking incremental reads", async (t) => {
+  let live = ["101", "100"];
+  mockTimeline(t, (url) => {
+    const cursor = url.searchParams.get("cursor");
+    if (cursor === "obsolete") return new Response("cursor no longer usable", { status: 404 });
+    if (cursor === "new-history") return page(["99", "98"]);
+    return url.hostname === "xitter.cf" ? page(["101", "100"], "new-history") : page(live);
+  });
+  let cursor = { freeXSeen: ["a:101", "a:100", "a:99"], freeXPages: { profile: "obsolete", replies: "obsolete" } };
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt === 2) live = ["102", "101", "100"];
+    const failed = await fetchFreeX("Alice", cursor);
+    assert.deepEqual(itemIds(failed), attempt === 2 ? ["102"] : []);
+    assert.equal(failed.cursor.backfillComplete, false);
+    assert.equal(failed.cursor.freeXBackfill.errors.length, 2);
+    cursor = failed.cursor as typeof cursor;
+  }
+  const recovered = await fetchFreeX("Alice", cursor);
+  assert.deepEqual(itemIds(recovered), ["98"]);
+  assert.equal(recovered.cursor.backfillComplete, true);
+  assert.deepEqual(recovered.cursor.freeXBackfill.errors, []);
+});
+
+test("recent pagination passes arbitrary known IDs until it overlaps the previous live head", async (t) => {
+  let burst = false;
+  mockTimeline(t, (url) => {
+    if (!burst) return page(["110", "109"], "ordinary");
+    switch (url.searchParams.get("cursor")) {
+      case "burst": return page(["112", "100"], "prior-head");
+      case "prior-head": return page(["111", "110", "109"], "unneeded");
+      default: return page(["114", "113", "100"], "burst");
+    }
+  });
+  const initial = await fetchFreeX("Alice", { freeXSeen: ["a:110", "a:109", "a:100"], freeXPages: completed });
+  burst = true;
+  const first = await fetchFreeX("Alice", initial.cursor);
+  assert.deepEqual(itemIds(first), ["114", "113", "112"]);
+  assert.equal(first.cursor.freeXFreshPages.profile, "prior-head");
+  const next = await fetchFreeX("Alice", first.cursor);
+  assert.deepEqual(itemIds(next), ["111"]);
+  assert.deepEqual(next.cursor.freeXFreshPages, completed);
 });

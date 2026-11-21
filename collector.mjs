@@ -68,6 +68,7 @@ export function initCollector(db) {
   if (!columns.has('page_state')) db.exec('ALTER TABLE x_sources ADD COLUMN page_state TEXT');
   if (!columns.has('partial_read')) db.exec('ALTER TABLE x_sources ADD COLUMN partial_read INTEGER NOT NULL DEFAULT 0');
   if (!columns.has('pending_count')) db.exec('ALTER TABLE x_sources ADD COLUMN pending_count INTEGER NOT NULL DEFAULT 0');
+  if (!columns.has('unavailable_count')) db.exec('ALTER TABLE x_sources ADD COLUMN unavailable_count INTEGER NOT NULL DEFAULT 0');
   const statement = db.prepare('INSERT OR IGNORE INTO x_sources (handle) VALUES (?)');
   for (const handle of handles) statement.run(handle);
 }
@@ -240,6 +241,7 @@ export function sources(db) {
     const row = query.get(handle);
     const pending = row.pending ? JSON.parse(row.pending) : null;
     let status = row.last_success ? row.last_count ? 'ok' : 'empty' : 'pending';
+    if (row.unavailable_count) status = 'unavailable';
     if (pending) status = row.coverage_start ? 'catching-up' : 'backfilling';
     if (row.pending_count) status = 'awaiting';
     if (row.partial_read) status = 'partial';
@@ -248,7 +250,7 @@ export function sources(db) {
       handle, status, lastSuccess: row.last_success, lastAttempt: row.last_attempt, error: row.error,
       coverageStart: row.coverage_start, coverageEnd: row.coverage_end,
       coverageMode: row.coverage_mode, pageState: row.page_state,
-      partialRead: !!row.partial_read, pendingCount: row.pending_count,
+      partialRead: !!row.partial_read, pendingCount: row.pending_count, unavailableCount: row.unavailable_count,
       backfillComplete: row.coverage_mode !== 'free' && !!row.coverage_start,
       latestPostAt: row.latest_post_at, postCount: row.post_count, sampleCount: row.sample_count, lastCount: row.last_count,
     };

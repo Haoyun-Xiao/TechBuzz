@@ -4,7 +4,7 @@ import type { ReactNode } from "react";
 import { NAV, subjectAfter, withSubject } from "@techbuzz/site";
 import { webModules } from "../../site-modules";
 import {
-  IconBolt, IconBookmark, IconDoc, IconFlame, IconGrid, IconHeart, IconList, IconPlug, IconUser,
+  IconBolt, IconBookmark, IconChart, IconDoc, IconFlame, IconGrid, IconHeart, IconList, IconPlug, IconSparkles, IconTrendUp, IconUsers, IconUser,
 } from "../icons";
 
 export interface NavItem {
@@ -27,6 +27,19 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
       { to: "/daily", label: withSubject("日报"), icon: IconDoc, covers: ["/weekly", "/monthly"] },
       { to: "/topics", label: "主题", icon: IconGrid },
       { to: "/starred", label: "收藏", icon: IconBookmark },
+    ],
+  },
+  {
+    title: "投研",
+    items: [
+      { to: "/research/#home", label: "投研看板", icon: IconGrid, end: true },
+      { to: "/research/#picks", label: "研究评分", icon: IconChart, end: true },
+      { to: "/research/#reports", label: "研究日报", icon: IconDoc, end: true },
+      { to: "/research/#ideas", label: "投资 Idea", icon: IconSparkles, end: true },
+      { to: "/research/#trends", label: "趋势跟踪", icon: IconTrendUp, end: true },
+      { to: "/research/#sources", label: "关注来源", icon: IconUsers, end: true },
+      { to: "/research/#saved", label: "研究收藏", icon: IconBookmark, end: true },
+      { to: "/research/#admin", label: "研究设置", icon: IconUser, end: true },
     ],
   },
   {

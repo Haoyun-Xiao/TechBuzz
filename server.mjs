@@ -1,14 +1,9 @@
 import http from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
-import { join, resolve, extname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { openDatabase } from './db.mjs';
 import { dashboard } from './dashboard.mjs';
 import { setThreshold } from './research.mjs';
 
-const root = fileURLToPath(new URL('./public/', import.meta.url));
-const types = { '.html':'text/html', '.js':'text/javascript', '.mjs':'text/javascript', '.css':'text/css', '.json':'application/json', '.svg':'image/svg+xml', '.png':'image/png', '.ico':'image/x-icon' };
 const groups = ['sources', 'posts', 'ideas', 'trends', 'reports'];
 const db = openDatabase();
 function json(res, status, value) {
@@ -48,11 +43,7 @@ const server = http.createServer(async (req,res) => {
       const value = id ? rows.find(r => String(r.id ?? r.handle) === id) : rows;
       return value ? json(res,200,value) : json(res,404,{error:'未找到记录'});
     }
-    const file = resolve(join(root,path === '/' ? 'index.html' : path));
-    if (!file.startsWith(root) || !(await stat(file)).isFile()) return json(res,404,{error:'未找到页面'});
-    const content = await readFile(file);
-    res.writeHead(200,{'Content-Type':(types[extname(file)] || 'application/octet-stream') + '; charset=utf-8'});
-    res.end(req.method === 'HEAD' ? undefined : content);
+    return json(res,404,{error:'未找到接口'});
   } catch (error) {
     if (error.code === 'ENOENT' || error instanceof URIError) return json(res,404,{error:'未找到页面'});
     console.error(error.name, error.code || 'request failed');

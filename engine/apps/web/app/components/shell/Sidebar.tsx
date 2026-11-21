@@ -1,4 +1,3 @@
-import { ResearchLinks } from "./ResearchLinks";
 import { Link, useLocation } from "react-router";
 import { IntentLink } from "../ui/IntentLink";
 import { useContainedScroll } from "../ui/Page";
@@ -69,7 +68,8 @@ function Rail() {
 }
 
 export function Sidebar() {
-  const { pathname } = useLocation();
+  const { pathname, hash } = useLocation();
+  const researchPath = pathname.replace(/\/$/, "") === "/research" ? `/research/${hash.split("?")[0] || "#home"}`.replace(/(#[^/]+)\/.*/, "$1") : pathname;
   const [columnRef, columnOverscroll] = useContainedScroll<HTMLElement>();
   const [navRef, navOverscroll] = useContainedScroll<HTMLElement>();
   const Account = webModules().find((m) => m.account)?.account;
@@ -83,10 +83,9 @@ export function Sidebar() {
           <Wordmark size={26} />
         </Link>
         <nav ref={navRef} className={`scrollbar-thin -mx-1 flex-1 overflow-y-auto px-1 short:flex-none short:overflow-visible ${navOverscroll}`} aria-label="主导航">
-          <ResearchLinks />
           {sidebar().map((section) => {
             // Only the most specific entry of a section is lit, so a detail page does not light the list above it too.
-            const lit = activeSidebarItem(section.items, pathname);
+            const lit = activeSidebarItem(section.items, researchPath);
             return (
               <div key={section.title}>
                 <div className="px-2.5 pb-1 pt-3.5 text-[11px] text-ink-4">{section.title}</div>

@@ -27,9 +27,13 @@ export interface FeedItemProps {
   showTags?: boolean;
   /** The time the item sits at in its list; phones show it in the source line (desktop: on the rail). */
   at?: string;
+  targetTo?: string;
+  star?: React.ReactNode;
+  scoreLabel?: string;
+  reasonLabel?: string;
 }
 
-export const FeedItem = memo(function FeedItem({ item, group, filters, read = false, onOpen, showTags = false, at }: FeedItemProps) {
+export const FeedItem = memo(function FeedItem({ item, group, filters, read = false, onOpen, showTags = false, at, targetTo, star, scoreLabel, reasonLabel }: FeedItemProps) {
   const isX = item.channel === "x" && !!item.x;
   const open = () => {
     rememberPreview(item);
@@ -54,27 +58,27 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 lg:gap-1.5">
           <span className="hidden lg:inline-flex">
-            <ScoreLabel score={item.score} />
+            <ScoreLabel score={item.score} label={scoreLabel} />
           </span>
           <span className="lg:hidden">
-            <ScoreLabel score={item.score} compact />
+            <ScoreLabel score={item.score} compact label={scoreLabel} />
           </span>
-          <span className="-my-[11px] -mr-3 inline-flex lg:-my-1 lg:mr-0">
-            <StarButton item={item} className="size-11 lg:size-[26px]" />
+          <span className="relative z-10 -my-[11px] -mr-3 inline-flex lg:-my-1 lg:mr-0">
+            {star ?? <StarButton item={item} className="size-11 lg:size-[26px]" />}
           </span>
         </span>
       </header>
 
       {isX ? (
         item.summary ? <p className={`mt-1.5 whitespace-pre-line text-[15px] leading-[1.75] line-clamp-5 lg:mt-2 lg:line-clamp-4 ${readTone(read, "text-ink")}`}>
-          <IntentLink viewTransition to={`/items/${item.id}`} onClick={open} className="after:absolute after:inset-0 after:content-['']">
+          <IntentLink viewTransition to={targetTo ?? `/items/${item.id}`} onClick={open} className="after:absolute after:inset-0 after:content-['']">
             {shortAddresses(item.summary)}
           </IntentLink>
-        </p> : <IntentLink viewTransition to={`/items/${item.id}`} onClick={open} aria-label={`查看 ${item.x!.authorName} 的帖子`} className="absolute inset-0" />
+        </p> : <IntentLink viewTransition to={targetTo ?? `/items/${item.id}`} onClick={open} aria-label={`查看 ${item.x!.authorName} 的帖子`} className="absolute inset-0" />
       ) : (
         <>
           <h3 className={`mt-1.5 line-clamp-2 text-[17px] font-[650] leading-[1.5] lg:mt-2 lg:line-clamp-none lg:leading-[1.55] ${readTone(read, "text-ink")}`}>
-            <IntentLink viewTransition to={`/items/${item.id}`} onClick={open} className="after:absolute after:inset-0 after:content-['']">
+            <IntentLink viewTransition to={targetTo ?? `/items/${item.id}`} onClick={open} className="after:absolute after:inset-0 after:content-['']">
               {item.title}
             </IntentLink>
           </h3>
@@ -116,7 +120,7 @@ export const FeedItem = memo(function FeedItem({ item, group, filters, read = fa
 
       {item.reason && (
         <div className="mt-1 lg:mt-3 lg:border-t lg:border-line-soft lg:pt-3">
-          <p className="line-clamp-1 text-[13px] leading-[1.65] text-note lg:line-clamp-none lg:leading-[1.75]">{`${ITEM_COPY.reasonLabel}：`}{item.reason}</p>
+          <p className="line-clamp-1 text-[13px] leading-[1.65] text-note lg:line-clamp-none lg:leading-[1.75]">{`${reasonLabel ?? ITEM_COPY.reasonLabel}：`}{item.reason}</p>
         </div>
       )}
 

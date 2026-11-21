@@ -27,6 +27,7 @@ test('the research cache takes engine revisions and references without polling o
   const db = openDatabase(':memory:');
   try {
     const root = row('1', 'SemiAnalysis_', '2026-11-20T02:00:00Z');
+    Object.assign(root, { native_id: 'published-1', text_zh: '已发布原帖的中文译文', quoted_zh: null });
     const reply = row('2', 'SemiAnalysis_', '2026-11-20T02:00:01Z', { replyTo: '1', replyToHandle: 'SemiAnalysis_' });
     const quoted = row('3', 'Omercheema', '2026-11-20T02:00:02Z', {
       quoted: { handle: 'someone', text: 'quoted context', url: 'https://x.com/someone/status/99' },
@@ -38,6 +39,9 @@ test('the research cache takes engine revisions and references without polling o
     db.prepare("UPDATE research_settings SET threshold = 82 WHERE id = 1").run();
     const bridged = await syncResearch(db, query([root, reply, quoted, sample]));
     assert.deepEqual(bridged.map(post => post.id), ['4', '3', '2', '1']);
+    assert.equal(bridged.find(post => post.id === '1').textZh, '已发布原帖的中文译文');
+    assert.equal(bridged.find(post => post.id === '1').nativeArticleId, 'published-1');
+    assert.equal(bridged.find(post => post.id === '4').nativeArticleId, null);
     assert.equal(bridged.find(post => post.id === '4').text, 'full verified text');
     assert.equal(bridged.find(post => post.id === '3').evidenceKey, 'x:99');
     assert.deepEqual(bridged.find(post => post.id === '1').thread.map(post => post.id), ['2']);
@@ -85,7 +89,9 @@ test('free observation ranges do not claim complete history', async () => {
     assert.equal(source.coverageStart, '2026-11-01T00:00:00Z');
     freeStates[0].cursor.freeX.backfillComplete = false;
     await syncResearch(db, query([], freeStates));
-    assert.equal(dashboard(db).sources.find(item => item.handle === source.handle).pageState, '分页进行中');
+    const pending = dashboard(db).sources.find(item => item.handle === source.handle);
+    assert.equal(pending.pageState, '分页进行中');
+    assert.equal(pending.status, 'catching-up');
   } finally { db.close(); }
 });
 
@@ -110,5 +116,13 @@ test('partial free reads expose failures and pending retries without discarding 
     assert.equal(source.status, 'awaiting');
     assert.equal(source.partialRead, false);
     assert.equal(source.pendingCount, 2);
+    freeStates[0].cursor.freeX.freeXPending = [];
+    freeStates[0].cursor.freeX.freeXUnavailable = [{ id: '7' }];
+    freeStates[0].cursor.freeX.backfillComplete = true;
+    await syncResearch(db, query([], freeStates));
+    source = dashboard(db).sources.find(item => item.handle.toLowerCase() === sourceIds[0].slice(2));
+    assert.equal(source.status, 'unavailable');
+    assert.equal(source.pendingCount, 0);
+    assert.equal(source.unavailableCount, 1);
   } finally { db.close(); }
 });

@@ -7,7 +7,8 @@ import { QUEUES, work } from "./queue.ts";
 import { registerExtractionJobs } from "./content.ts";
 
 export async function registerSourceJobs(boss: PgBoss) {
-  await work(boss, QUEUES.fetchSource, { localConcurrency: 8, pollingIntervalSeconds: 2 }, ({ sourceId, force }) => collectSource(sourceId, { force }));
+  const sourceConcurrency = process.env.TECHBUZZ_X_PROVIDER === "free" ? 3 : 8;
+  await work(boss, QUEUES.fetchSource, { localConcurrency: sourceConcurrency, pollingIntervalSeconds: 2 }, ({ sourceId, force }) => collectSource(sourceId, { force }));
   // One search per shard of X accounts; every SocialData caller shares its per-minute budget.
   await work(boss, QUEUES.fetchXShard, { localConcurrency: 2, pollingIntervalSeconds: 2 }, ({ key, sourceIds }) => collectXShard(key, sourceIds));
   // WeChat accounts through Dajiala, only when it is configured (as their scheduled checks); it allows a

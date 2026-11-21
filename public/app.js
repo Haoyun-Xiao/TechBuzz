@@ -650,7 +650,7 @@ function detail(type, id) {
       ${item.summary ? `<p>${esc(item.summary)}</p>` : ""}
       ${tagList(item.topics, "topic")}
       ${tagList(item.companies, "company")}
-      <div class="actions">${saveButton(type, item.id)}${["trends", "ideas", "reports"].includes(type) ? internal("交给 Agent", "agent", "", { type, item: item.id }, "button") : ""}</div>
+      <div class="actions">${saveButton(type, item.id)}</div>
       ${item.model || item.generatedAt ? `<details class="score-note"><summary>生成信息</summary><div class="meta">${item.generatedAt ? `<span>生成于 ${stamp(item.generatedAt)}</span>` : ""}${item.model ? `<span>${esc(item.model)}</span>` : ""}${item.reasoningEffort ? `<span>推理强度 ${esc(item.reasoningEffort)}</span>` : ""}</div></details>` : ""}
     </header>
     ${section("研究要点", facts)}
@@ -687,59 +687,6 @@ function bookmarks() {
   });
   return `<div class="narrow">${heading("收藏", "收藏保存在当前浏览器。")}
     ${items.length ? `<div class="panel">${items.join("")}</div>` : empty("你还没有收藏帖子或研究。", internal("浏览精选帖子", "picks"))}</div>`;
-}
-
-function agentPacket(type, item) {
-  const report = [
-    "# " + (item?.title || TYPES[type].title),
-    "生成时间（北京时间） " + dateLabel(payload.generatedAt),
-    "数据模式 " + (live ? "实时接口" : "静态快照"),
-  ];
-  const entries = item ? [item] : byNewest(list(payload[type])).slice(0, 10);
-  for (const entry of entries) {
-    report.push("", "## " + entry.title, entry.summary || "");
-    if (entry.asOf) report.push("证据截至 " + entry.asOf);
-    const url = new URL(routeLink(type, entry.id), location.href);
-    report.push("看板详情 " + url);
-    for (const [label, value] of researchFields(entry)) report.push(`- **${label}** ${value}`);
-    for (const entrySection of list(entry.sections)) report.push("", "### " + entrySection.title, entrySection.summary);
-    for (const group of [
-      ["支持证据", entry.evidence],
-      ["反证", entry.counterEvidence],
-    ]) {
-      for (const post of getEvidence(group[1])) {
-        if (post.unavailable) {
-          report.push("- " + group[0] + "（当前快照未收录） " + post.id);
-        } else {
-          report.push(`- ${group[0]} ${postAuthor(post)} | ${dateLabel(post.publishedAt)} | ${httpURL(post.url) || "链接未收录"}`);
-          const summary = score(post).summary || post.summary;
-          if (summary) report.push("  " + summary);
-        }
-      }
-    }
-  }
-  return report.join("\n");
-}
-
-function agent(query) {
-  const types = ["reports", "ideas", "trends"];
-  const type = types.includes(query.get("type")) ? query.get("type") : "reports";
-  const items = byNewest(list(payload[type]));
-  const item = items.find(entry => String(entry.id) === query.get("item"));
-  const paths = live ? ["/agent", "/openapi-v1.json", "/feed.xml", "api/dashboard", "api/posts", "api/sources", "api/reports", "api/ideas", "api/trends"] : ["snapshot.json"];
-  return `<div class="narrow">${heading("Agent 接入", "将研究摘要、证据链接和待核对问题交给你的 Agent。")}
-    <section class="panel panel-body">
-      <h2>研究上下文</h2>
-      <form class="form-grid" id="agent-form">
-        ${select("type", "类别", types.map(key => [key, TYPES[key].title]), type, "研究日报")}
-        ${select("item", "研究条目", items.map(entry => [String(entry.id), entry.title]), item ? String(item.id) : "", "最近 10 条")}
-      </form>
-      <textarea class="agent-output" id="agent-packet" aria-label="研究上下文" readonly>${esc(agentPacket(type, item))}</textarea>
-      <div class="actions"><button class="button primary" type="button" data-action="copy">复制上下文</button><button class="button" type="button" data-action="download">下载 Markdown</button></div>
-    </section>
-    ${section("机器可读数据", `<div class="panel panel-body"><p>${live ? "以下 JSON 接口无需管理令牌，可供 Agent 读取。" : "当前页面使用公开快照。Agent 可读取以下 JSON 文件。"}</p>
-      <ul class="endpoint-list">${paths.map(path => `<li><a href="${path.startsWith("/") ? path : "./" + path}"><code>${path.startsWith("/") ? path : "/" + path}</code></a></li>`).join("")}</ul></div>`)}
-  </div>`;
 }
 
 function sourceDetails(source) {
@@ -831,7 +778,7 @@ function render() {
     const pages = {
       home, feed: () => feed("feed", query), picks: () => feed("picks", query),
       topics: () => feed("topics", query), saved: bookmarks, post: () => postDetail(id),
-      agent: () => agent(query), admin, about,
+      admin, about,
     };
     main.innerHTML = Object.hasOwn(pages, page) ? pages[page]() : missing();
   }
@@ -900,38 +847,13 @@ main.addEventListener("submit", event => {
   }
 });
 
-main.addEventListener("change", event => {
-  if (event.target.form?.id !== "agent-form") return;
-  const data = new FormData(event.target.form);
-  location.hash = routeLink("agent", "", { type: data.get("type"), item: event.target.name === "type" ? "" : data.get("item") });
-});
-
 main.addEventListener("click", async event => {
   const button = event.target.closest("button");
   if (!button) return;
   if (button.dataset.save) setBookmark(button);
   const action = button.dataset.action;
   if (action === "refresh") loadData(true);
-  if (action === "copy") {
-    const packet = main.querySelector("#agent-packet");
-    try {
-      await navigator.clipboard.writeText(packet.value);
-      notify("已复制研究上下文");
-    } catch {
-      packet.focus();
-      packet.select();
-      notify("已选中研究上下文，可手动复制。");
-    }
-  }
-  if (action === "download") {
-    const packet = main.querySelector("#agent-packet");
-    const url = URL.createObjectURL(new Blob([packet.value], { type: "text/markdown;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `techbuzz-research-${day(payload.generatedAt) || "snapshot"}.md`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }
+
 });
 
 refresh.addEventListener("click", () => loadData(true));

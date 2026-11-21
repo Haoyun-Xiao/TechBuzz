@@ -34,6 +34,7 @@ function fromMaterial(row) {
   const text = native ? repostOf ? '' : post.text : verified.text;
   return {
     ...verified,
+    nativeArticleId: row.native_id ?? null, textZh: row.text_zh ?? null, quotedTextZh: row.quoted_zh ?? null,
     id: post.tweetId, handle: sourceHandles.get(row.source_id), url: row.url,
     publishedAt: row.published_at.toISOString(), collectedAt: row.discovered_at.toISOString(),
     authorName: native ? post.authorName : verified.authorName,
@@ -49,10 +50,15 @@ export async function syncResearch(db, sql) {
   const [materials, sources, activities] = await Promise.all([
     sql`
       SELECT a.source_id, a.url, a.published_at, a.discovered_at, a.x_post, a.x_article,
+             p.article_id AS native_id, tr.body_text AS text_zh, qt.text_zh AS quoted_zh,
              a.raw->'techbuzzSample' AS verified,
              EXISTS (SELECT 1 FROM article_discoveries d
                      WHERE d.article_id = a.id AND d.source_id = a.source_id AND d.via = 'fetch') AS fetched
       FROM articles a JOIN sources s ON s.id = a.source_id
+      LEFT JOIN publications p ON p.article_id = a.id AND p.visibility = 'public'
+        AND s.participation_mode = 'editorial' AND (NOT p.selected OR p.visible_after <= now()) AND NOT p.suppress_original
+      LEFT JOIN translations tr ON tr.article_id = p.article_id AND tr.lang = 'zh' AND tr.revision >= a.revision AND tr.complete
+      LEFT JOIN quote_translations qt ON p.channel = 'x' AND qt.tweet_id = substring(a.x_post->'quoted'->>'url' from '/status/([0-9]+)')
       WHERE s.kind = 'x_search' AND s.id IN ${sql(sourceIds)} AND a.published_at IS NOT NULL
         AND a.x_post IS NOT NULL
     `,
@@ -76,7 +82,7 @@ export async function syncResearch(db, sql) {
   const remove = db.prepare('DELETE FROM x_posts WHERE id = ?');
   const writeSource = db.prepare(`
     UPDATE x_sources SET coverage_start = ?, coverage_end = ?, last_success = ?,
-      last_attempt = ?, error = ?, last_count = ?, pending = ?, coverage_mode = ?, page_state = ?, partial_read = ?, pending_count = ? WHERE handle = ?
+      last_attempt = ?, error = ?, last_count = ?, pending = ?, coverage_mode = ?, page_state = ?, partial_read = ?, pending_count = ?, unavailable_count = ? WHERE handle = ?
   `);
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -100,14 +106,18 @@ export async function syncResearch(db, sql) {
       const errors = Array.isArray(free?.freeXBackfill?.errors) ? free.freeXBackfill.errors : [];
       const detailFailures = Number(free?.freeXDetailFailures) || 0;
       const pendingCount = Array.isArray(free?.freeXPending) ? free.freeXPending.length : 0;
+      const unavailableCount = Array.isArray(free?.freeXUnavailable) ? free.freeXUnavailable.length : 0;
+      const freshPending = Object.values(free?.freeXFreshPages ?? {}).some(Boolean);
+      const paginationPending = free && (!free.backfillComplete || freshPending);
       writeSource.run(
         source.cursor?.xCoverageStart ?? null, source.cursor?.xCoverageEnd ?? null,
         source.last_ok_at?.toISOString() ?? null, source.last_fetch_at?.toISOString() ?? null,
         source.enabled ? source.last_error : '来源已暂停',
-        source.cursor?.xLastCount ?? source.new_count ?? null, source.cursor?.xWindow ? JSON.stringify(source.cursor.xWindow) : null,
+        source.cursor?.xLastCount ?? source.new_count ?? null,
+        paginationPending ? JSON.stringify({ pagination: true }) : source.cursor?.xWindow ? JSON.stringify(source.cursor.xWindow) : null,
         (source.cursor?.freeX && source.cursor.xProvider !== 'socialdata') ? 'free' : 'socialdata',
-        free ? (free.backfillComplete ? '已到达公开分页边界' : '分页进行中') : null,
-        errors.length || detailFailures > 0 ? 1 : 0, pendingCount,
+        free ? (free.backfillComplete ? (freshPending ? '近期分页进行中' : '已到达公开分页边界') : '分页进行中') : null,
+        errors.length || detailFailures > 0 ? 1 : 0, pendingCount, unavailableCount,
         sourceHandles.get(source.id),
       );
     }

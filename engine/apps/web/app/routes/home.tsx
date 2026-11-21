@@ -1,4 +1,4 @@
-import { ResearchLinks } from "../components/shell/ResearchLinks";
+import { Research } from "../features/research/Research";
 import { redirect, useLoaderData } from "react-router";
 import { SITE } from "@techbuzz/site";
 import type { Route } from "./+types/home";
@@ -25,7 +25,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const upstream = new Headers();
   const data = await loadOr404<TimelineResponse>(listPath("/api/site/timeline", filterParams(filters)), { responseHeaders: upstream, signal: request.signal });
   // A minute at most, here and on /all: new selections must not wait longer at the edge or in a browser.
-  return cachedPage(60, { data, filters }, upstream);
+  return cachedPage(60, { researchEnabled: !!process.env.TECHBUZZ_RESEARCH_URL, data, filters }, upstream);
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -38,13 +38,12 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function Home() {
-  const { data, filters } = useLoaderData<typeof loader>();
+  const { researchEnabled, data, filters } = useLoaderData<typeof loader>();
   const title = filters.tag ? `#${filters.tag}` : "精选";
   return (
     <div className="pb-6">
       {/* Phones: the bar (精选 | 全部, filter, search), the filter in use, today's hot topics, the feed. */}
       <FeedBar base="/" category={filters.category} channel={filters.channel} />
-      <div className="wide:hidden"><ResearchLinks /></div>
       <ActiveFilters base="/" category={filters.category} channel={filters.channel} tag={filters.tag} />
       <div className="hidden lg:block">
         <h1 className="text-[24px] font-semibold leading-[1.3] text-ink">{title}</h1>
@@ -53,6 +52,8 @@ export default function Home() {
           <SearchField keep={{ category: filters.category }} />
         </div>
       </div>
+
+      {researchEnabled && !hasFeedFilters(filters) && <details open className="mb-6"><summary className="cursor-pointer text-[17px] font-semibold text-ink">研究评分精选</summary><Research initial="picks" embedded /></details>}
 
       {data.hot && inNav("/hot") && <HotTopics entries={data.hot} />}
 

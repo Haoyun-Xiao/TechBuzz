@@ -1,9 +1,8 @@
-import { ResearchLinks } from "../components/shell/ResearchLinks";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { POLICY, SITE } from "@techbuzz/site";
 import { PhoneBar } from "../components/shell/PhoneBar";
-import { inNav } from "../components/shell/nav";
+import { inNav, sidebar } from "../components/shell/nav";
 import type { Screen } from "../components/shell/screens";
 import { edgeTtl } from "../lib/api.server";
 import { webModules } from "../site-modules";
@@ -93,7 +92,7 @@ export default function MorePage() {
             </Select>
           </li>
         </Group>
-        <Group title="投研"><li><ResearchLinks /></li></Group>
+        <Group title="投研">{sidebar().find(section => section.title === "投研")?.items.map(item => <RowLink key={item.to} row={{ to: item.to, label: item.label, icon: <item.icon size={20} /> }} />)}</Group>
         <Group title="工具与入口">
           {tools().map((r) => (
             <RowLink key={r.to} row={r} />

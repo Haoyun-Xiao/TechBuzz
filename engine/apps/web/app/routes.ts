@@ -38,6 +38,7 @@ export default [
   route("privacy", "routes/privacy.tsx"),
   route("more", "routes/more.tsx"),
   route("starred", "routes/starred.tsx"),
+  route("research", "routes/research.tsx"),
   route("agent", "routes/agent.tsx"),
   ...modulePages,
   // The modules' admin pages (ModulePage.admin), for the admins a site module names, in their own back-office shell.

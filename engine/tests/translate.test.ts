@@ -257,6 +257,32 @@ test("the length cap counts what the model is sent, not the addresses of links i
   assert.equal(body.zh?.match(/引用<a href="https:\/\/example\.com\/x+">来源<\/a>的段落/g)?.length, 40);
 });
 
+test("a public X post outside selection gets a native translation without article full-text permission", async () => {
+  const source = `${SOURCE}-public-post`;
+  await sql`INSERT INTO sources (id, name, kind, tier, participation_mode, site_fulltext, next_fetch_at)
+    VALUES (${source}, 'Public X posts', 'x_search', 'T2', 'editorial', false, '2100-01-01')`;
+  const text = `The price is twenty dollars after the latest revision to the model portfolio. ${T}`;
+  const tweetId = `4${Date.now()}`;
+  const { articleId } = await upsertMaterial({
+    sourceId: source, url: `https://x.com/example/status/${tweetId}`, title: text, language: "en",
+    bodyText: text, bodyStatus: "ok", via: "fetch", publishedAt: new Date(), discoveredAt: new Date(Date.now() + 1_700_000),
+    xPost: { tweetId, authorName: "Test", handle: "example", text },
+  });
+  await sql`INSERT INTO analyses (article_id, input_revision, origin, relevance, category, title_zh, summary_zh, score, selected)
+    VALUES (${articleId}, 1, 'rule', 'pass', 'ai-models', '最新价格', '模型组合更新', 70, false)`;
+  await publishArticle(articleId);
+  const [publication] = await sql`SELECT visibility, body_mode, selected FROM publications WHERE article_id = ${articleId}`;
+  assert.deepEqual({ ...publication }, { visibility: "public", body_mode: "summary", selected: false });
+
+  const run = await translatePending({ limit: 1 });
+  assert.equal(run.done.find(row => row.articleId === articleId)?.status, "translated");
+  const translated = (await app.inject({ method: "GET", url: `/api/site/items/${articleId}` })).json();
+  assert.equal(translated.hasTranslation, true);
+  assert.equal(translated.body.zh, "<p>价格是二十美元。</p>");
+  const original = (await app.inject({ method: "GET", url: `/api/site/items/${articleId}/original` })).json();
+  assert.equal(original.body.original, `<p>${text}</p>`);
+});
+
 test("the post a selected X post quotes is translated once and shown with the item", async () => {
   const tweetId = `7${Date.now()}`;
   const { articleId: id } = await upsertMaterial({
@@ -488,6 +514,14 @@ test("a selected X long article is translated as its page shows it: the article,
   const md = (await app.inject({method:'GET',url:`/items/${long}/markdown`})).body;
   assert.match(md, /## 正文 · 中文译文[\s\S]*价格是二十美元[\s\S]*## 正文 · 原文[\s\S]*The price is twenty dollars/);
   assert.ok((await app.inject({method:'GET',url:'/feed/full.xml'})).body.includes('价格是二十美元'), 'the full feed carries the complete translation');
+
+  await sql`UPDATE sources SET site_fulltext=false WHERE id=${source}`;
+  await publishArticle(long);
+  const postOnly = (await app.inject({method:'GET',url:`/api/site/items/${long}`})).json();
+  assert.equal(postOnly.hasTranslation, false);
+  assert.match(postOnly.body.original, /This introduction comes with a long article/);
+  assert.doesNotMatch(postOnly.body.original, /The price is twenty dollars/);
+  assert.equal((await translateArticle(long)).status, 'skipped');
 });
 
 test("a post quoting a long-article post gets the quoted words translated, not the article's translation", async () => {

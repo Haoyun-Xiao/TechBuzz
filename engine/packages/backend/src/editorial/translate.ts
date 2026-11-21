@@ -1,12 +1,12 @@
-// Full-text Chinese translations: made by the worker after an item
-// is selected, for sources whose full text may be shown on the site; a page read never translates.
+// Chinese translations are made by the worker for public X posts and selected full-text articles.
+// A page read never translates.
 // Bodies are translated block by block (paragraphs, headings, list items, captions, table cells) so the
 // sanitised structure stays as it is. Inside a block, images and inline code never reach the model
 // (placeholders) and links keep only their text and an id; a block whose answer loses or repeats any of
 // them is asked once more, closer to the original wording (rewording is what drops links), then kept in
 // the original. Each batch is a receipt, so a re-run reuses
 // answers already paid for. A translation missing any block is stored as incomplete, never as whole.
-// The post a selected X post quotes is translated too (once per quoted post, shared by every quote).
+// Quoted X posts are translated too (once per quoted post, shared by every quote).
 import * as cheerio from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 import { z } from "zod";
@@ -22,6 +22,7 @@ import { modelFor } from "./models.ts";
 import { shutdownSignal } from "../jobs/queue.ts";
 import { promptText, promptVersion } from "./prompts.ts";
 import { editorialPolicy, emit } from "../modules.ts";
+import { SHOWN_POST } from "../publication/items.ts";
 import { republishTx } from "../publication/publish.ts";
 
 export const TRANSLATE_PROMPT_VERSION = promptVersion("translate-body", "translate-body-retry", "translate-post");
@@ -30,6 +31,11 @@ const BATCH_CHARS = 3500;
 const MAX_CHARS = 60_000;
 /** X posts shorter than this carry their meaning in the Chinese title and summary. */
 const X_MIN_CHARS = 60;
+
+const PUBLIC_TRANSLATION = sql`p.visibility = 'public' AND s.participation_mode = 'editorial' AND NOT p.suppress_original`;
+// A saved X Article still follows the full-text rule, even if its surrounding X post is visible.
+const BODY_TRANSLATION = sql`${PUBLIC_TRANSLATION}
+  AND ((p.selected AND p.body_mode = 'full') OR (${SHOWN_POST} AND a.x_article IS NULL))`;
 
 const BLOCK = new Set(["p", "h2", "h3", "h4", "h5", "li", "blockquote", "figcaption", "td", "th", "dt", "dd", "caption"]);
 const CONTAINER = /^(p|h[2-5]|li|blockquote|figcaption|td|th|dt|dd|caption|ul|ol|table|pre|figure|div)$/;
@@ -196,20 +202,18 @@ async function suppressFromTranslation(articleId: string, revision: number, rece
 }
 
 export async function translateArticle(articleId: string, expectedRevision?: number): Promise<TranslateResult> {
-  const [row] = await sql<{ revision: number; channel: string; language: string | null; body_html: string | null; body_text: string | null; x_post: { text?: string } | null; x_article: { title?: string; text?: string; html?: string } | null; title: string; selected: boolean; body_mode: string; suppress_original: boolean; visibility: string }[]>`
-    SELECT a.revision, p.channel, a.language, a.body_html, a.body_text, a.x_post, a.x_article, p.title, p.selected, p.body_mode, p.suppress_original, p.visibility
-    FROM publications p JOIN articles a ON a.id = p.article_id WHERE p.article_id = ${articleId}
+  const [row] = await sql<{ revision: number; channel: string; language: string | null; body_html: string | null; body_text: string | null; x_post: { text?: string } | null; x_article: { title?: string; text?: string; html?: string } | null; title: string }[]>`
+    SELECT a.revision, p.channel, a.language, a.body_html, a.body_text, a.x_post, a.x_article, p.title
+    FROM publications p JOIN articles a ON a.id = p.article_id JOIN sources s ON s.id = p.source_id
+    WHERE p.article_id = ${articleId} AND ${BODY_TRANSLATION}
       AND (${expectedRevision ?? null}::int IS NULL OR a.revision = ${expectedRevision ?? null})`;
-  if (!row) return { articleId, revision: expectedRevision, status: "skipped", reason: "not published at the requested revision" };
+  if (!row) return { articleId, revision: expectedRevision, status: "skipped", reason: "no translatable public body at the requested revision" };
   const result = (r: Omit<TranslateResult, "articleId" | "revision">): TranslateResult => ({ articleId, revision: row.revision, ...r });
   // No answer could be used: each is rejected, so the next attempt pays for fresh ones instead of reusing them.
   const unusable = async (receiptIds: number[], reason: string) => {
     for (const id of new Set(receiptIds)) await rejectReceivedResponse(id, `unusable translation: ${reason}`);
     return result({ status: "failed", reason });
   };
-  if (!row.selected || row.visibility !== "public" || row.body_mode !== "full" || row.suppress_original) {
-    return result({ status: "skipped", reason: "not a selected full-text item" });
-  }
   const reviewer = editorialPolicy().reviewTranslation;
 
   // A post with a saved long article reads as an article (publication/detail.ts), so it is translated as an
@@ -386,7 +390,7 @@ function quoteTranslatable(text: string): boolean {
 }
 
 /**
- * The posts that selected X posts of the last `days` quote, translated once per quoted post: the
+ * Public X posts' recent quotes, translated once per quoted post: the
  * translation of the quoted post's own item is reused when it was collected and translated, else
  * DeepSeek (the translate model) translates it. Returns how many were stored.
  */
@@ -398,10 +402,10 @@ export async function translateQuotes(opts: { days?: number; limit?: number; bud
        WHERE o.identity_key = 'x:' || q.tweet_id AND tr.complete AND coalesce(tr.body_text, '') <> ''
          -- A post with a saved long article is translated as that article: its translation is not the post's words.
          AND coalesce(o.x_article->>'text', '') = '') AS own_zh
-    FROM publications p JOIN articles a ON a.id = p.article_id
+    FROM publications p JOIN articles a ON a.id = p.article_id JOIN sources s ON s.id = p.source_id
     CROSS JOIN LATERAL (SELECT substring(a.x_post->'quoted'->>'url' from '/status/([0-9]+)') AS tweet_id) q
     LEFT JOIN quote_translations qt ON qt.tweet_id = q.tweet_id
-    WHERE p.channel = 'x' AND p.selected AND p.visibility = 'public' AND p.body_mode = 'full' AND NOT p.suppress_original
+    WHERE ${PUBLIC_TRANSLATION} AND ${SHOWN_POST}
       AND p.discovered_at > now() - make_interval(days => ${opts.days ?? 3})
       AND q.tweet_id IS NOT NULL AND coalesce(a.x_post->'quoted'->>'text', '') <> ''
     ORDER BY q.tweet_id, p.discovered_at DESC`;
@@ -481,8 +485,8 @@ export async function translateQuotes(opts: { days?: number; limit?: number; bud
 }
 
 /**
- * Every few minutes: selected full-text items discovered or revised in the last three days that lack a
- * translation of their current revision, then the posts selected X posts quote. Stops after a time
+ * Every few minutes: public X posts and selected full-text articles discovered or revised in the last three days
+ * that lack a translation of their current revision, then recent quotes from public X posts. Stops after a time
  * budget. A translation of an older revision is not shown (items.ts), so a revised item is translated
  * again whatever its age. Three failed attempts give an item up; only failures of the item itself count.
  */
@@ -491,9 +495,9 @@ export async function translatePending(opts: { limit?: number; budgetMs?: number
   const pending = await sql<{ article_id: string; revision: number; language: string | null; text: string | null }[]>`
     SELECT p.article_id,a.revision,a.language,
       CASE WHEN p.channel='x' THEN coalesce(nullif(a.x_article->>'text',''),a.x_post->>'text',a.body_text) ELSE a.body_text END AS text
-    FROM publications p JOIN articles a ON a.id = p.article_id
+    FROM publications p JOIN articles a ON a.id = p.article_id JOIN sources s ON s.id = p.source_id
     LEFT JOIN translations tr ON tr.article_id = p.article_id AND tr.lang = 'zh'
-    WHERE p.selected AND p.visibility = 'public' AND p.body_mode = 'full' AND NOT p.suppress_original
+    WHERE ${BODY_TRANSLATION}
       AND (p.channel='x' OR a.body_html IS NOT NULL)
       AND (p.discovered_at > now() - interval '3 days'
            OR EXISTS (SELECT 1 FROM article_revisions r WHERE r.article_id = a.id AND r.revision = a.revision AND r.revision > 1

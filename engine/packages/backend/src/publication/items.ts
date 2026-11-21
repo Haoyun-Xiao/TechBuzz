@@ -60,7 +60,8 @@ export const ITEM_COLUMNS = sql`
   a.author, a.language,
   CASE WHEN NOT p.suppress_original AND s.kind = 'x_search' AND ${sourceOwnsPost(sql`s.config`, sql`a.x_post->>'handle'`)} THEN s.icon_url END AS author_avatar_url,
   st.public_id::text AS story_public_id, st.title AS story_title,
-  CASE WHEN p.channel = 'x' AND NOT p.suppress_original THEN tr.body_text END AS zh_text,
+  -- The stored translation can cover a saved X Article whose full text is withheld.
+  CASE WHEN p.channel = 'x' AND NOT p.suppress_original AND (p.body_mode = 'full' OR a.x_article IS NULL) THEN tr.body_text END AS zh_text,
   CASE WHEN NOT p.suppress_original THEN qt.text_zh END AS quoted_zh`;
 
 /** Public API listings never render article bodies, X media or story metadata. */
@@ -153,9 +154,13 @@ export function xView(row: Pick<ItemRow, "x_post" | "zh_text"> & Partial<Pick<It
  * Whether pages show an X post's own text and media. A site that counts them as full text shows them
  * only where the source allows full text, as it does an article's body.
  */
-export function showsPost(row: { channel: string; body_mode: string; suppress_original?: boolean }): boolean {
-  return row.channel === "x" && !row.suppress_original && (!POLICY.xPostIsFullText || row.body_mode === "full");
+export function showsPost(row: { channel: string; body_mode: string; suppress_original?: boolean; x_post: unknown }): boolean {
+  return row.channel === "x" && !row.suppress_original && (row.body_mode === "full" || (!POLICY.xPostIsFullText && !!row.x_post));
 }
+
+/** The same X post display rule in queries over publications and articles. */
+export const SHOWN_POST = sql`p.channel = 'x' AND NOT p.suppress_original AND
+  (p.body_mode = 'full' OR (NOT ${POLICY.xPostIsFullText} AND a.x_post IS NOT NULL))`;
 
 /** A page's own text shorter than this is one standard post's worth (280 characters) or less. */
 export const THIN_PAGE_CHARS = 300;
@@ -170,11 +175,8 @@ export const THIN_PAGE_CHARS = 300;
  * later does not flip the decision.
  */
 export function thinPageCondition() {
-  const post = POLICY.xPostIsFullText
-    ? sql`p.channel = 'x' AND NOT p.suppress_original AND p.body_mode = 'full'`
-    : sql`p.channel = 'x' AND NOT p.suppress_original`;
   return sql`(p.seo_indexed_at IS NULL AND CASE
-    WHEN ${post} THEN char_length(CASE WHEN a.x_post IS NULL THEN coalesce(a.body_text, '') ELSE coalesce(a.x_post->>'text', '') END)
+    WHEN ${SHOWN_POST} THEN char_length(CASE WHEN a.x_post IS NULL THEN coalesce(a.body_text, '') ELSE coalesce(a.x_post->>'text', '') END)
       + CASE WHEN p.body_mode = 'full' THEN char_length(coalesce(a.x_article->>'text', '')) ELSE 0 END
     WHEN p.body_mode = 'full' AND a.body_html IS NOT NULL THEN char_length(coalesce(a.body_text, ''))
     ELSE 0 END < ${THIN_PAGE_CHARS})`;

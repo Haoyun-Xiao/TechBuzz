@@ -958,6 +958,7 @@ export function ensureIdeaTracking(db, idea, now = Date.now()) {
   putEntry(db,'trends',{...baseline,title:'验证进展 · '+idea.title,
     summary:'跟踪已建立，等待新增证据检验原假设。',
     stage:'待验证',trackingStatus:'awaiting-evidence',trackingKind:'idea',
+    companies:idea.companies??[],topics:idea.topics??[],
     evidence:[],counterEvidence:[],relatedIds:[idea.id],history:[],timeline:[],
     watchVariables:idea.watchVariables??[],
     firstSeen:beijingDate(now),updatedAt:iso(now),asOf:idea.asOf,generatedAt:null,

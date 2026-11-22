@@ -62,3 +62,10 @@ python3 engine/scripts/offline/export.py ~/Downloads/TechBuzz.html
 `demo/snapshot.json` 是已导出的研究快照。可用 `docker compose run --rm -v "$PWD/.runtime/site:/output" research node export.mjs /output` 从当前研究数据库重新导出，再在该目录启动静态文件服务。
 
 复用代码和字体的声明见 [第三方说明](THIRD_PARTY_NOTICES.md)。
+
+
+## Idea 趋势跟踪
+
+趋势页分为常规趋势与 Idea 趋势跟踪。后者读取已有 Idea 的假设、验证条件和滚动窗口观察，保存原始判断，并通过稳定的 `sourceIdeaId` 关联原 Idea。两组独立记录任务状态，共用已缓存的分批观察。Idea 跟踪更新单独的趋势记录。
+
+本机 `TECHBUZZ_IDEAS_ENABLED=false` 暂停 Idea 自动生成，评分、翻译、日报与两组趋势照常运行。调整好 Idea 提示词后，设为 `true` 并重建研究 worker 即可恢复。

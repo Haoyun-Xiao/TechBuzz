@@ -95,6 +95,9 @@ export interface ResearchEntry extends EvidenceEntry {
   mergedFrom?: string[];
   lastSignalAt?: string;
   researchFormat?: number;
+  sourceIdeaId?: string;
+  trackingKind?: "idea";
+  originalIdea?: {id: string; title: string; judgment: string; asOf?: string; verification?: string};
   id: string;
   title: string;
   asOf?: string;
@@ -181,7 +184,7 @@ export interface Dashboard {
   hot: HotEntry[];
   singleHot: HotEntry[];
   topics: Topic[];
-  generation: Record<"ideas" | "trends" | "report", Generation>;
+  generation: Record<"ideas" | "trends" | "report", Generation> & {ideaTrends?: Generation};
   threshold: number;
   thresholdVersion?: number;
   generatedAt: string;

@@ -34,3 +34,33 @@ test('linked ideas resolve merged trends in both directions while historical det
  assert.equal(result.archivedTrends[0].mergedInto,'trend-main');
  db.close();
 });
+
+test('Idea tracking keeps a stable separate identity and a frozen original thesis',async()=>{
+ const {ideaTrackingPrior}=await import('./research.mjs');
+ const idea={id:'idea-example',title:'激光器供给',coreIdea:'高功率供给偏紧',evidence:['p1'],status:'active'};
+ const first=ideaTrackingPrior(idea,[]);
+ assert.equal(first.sourceIdeaId,idea.id);
+ assert(first.id.startsWith('trend-'));
+ const again=ideaTrackingPrior({...idea,coreIdea:'供给有望改善'},[first]);
+ assert.equal(again.id,first.id);
+ assert.equal(again.originalIdea.judgment,'高功率供给偏紧');
+ assert.equal(again.currentIdea.judgment,'供给有望改善');
+ assert.equal(idea.coreIdea,'高功率供给偏紧');
+});
+
+test('pausing Idea generation still scores new material',async t=>{
+ const {DatabaseSync}=await import('node:sqlite');const {initResearch,runResearchModule}=await import('./research.mjs');
+ const db=new DatabaseSync(':memory:');initResearch(db);
+ const env={TECHBUZZ_IDEAS_ENABLED:'false',TECHBUZZ_LLM_BASE_URL:'https://model.example/v1',TECHBUZZ_LLM_MODEL:'test-model',TECHBUZZ_LLM_API_KEY:'test'};
+ const previous={};for(const [k,v] of Object.entries(env)){previous[k]=process.env[k];process.env[k]=v}
+ t.after(()=>{for(const k of Object.keys(env)){if(previous[k]===undefined)delete process.env[k];else process.env[k]=previous[k]}db.close()});
+ let calls=0;
+ t.mock.method(globalThis,'fetch',async(_url,request)=>{
+  calls++;const body=JSON.parse(request.body);const input=JSON.parse(body.messages[1].content);assert.equal(input.posts.length,1);
+  return Response.json({model:'test-model',choices:[{finish_reason:'stop',message:{content:JSON.stringify({scores:[{id:'P1',breakdown:{impact:30,novelty:20,verification:20,followUp:12},reason:'公司披露',summary:'新订单',strength:'high',topics:['半导体'],companies:['Example'],event:'签约'}]})}}]});
+ });
+ await runResearchModule(db,[{id:'new',handle:'source',publishedAt:new Date().toISOString(),text:'New contract',url:'https://x.com/source/status/new'}],'ideas');
+ assert.equal(calls,1);
+ assert.equal(db.prepare('select count(*) n from research_scores').get().n,1);
+ assert.equal(db.prepare('select count(*) n from research_ideas').get().n,0);
+});

@@ -45,6 +45,7 @@ export function EntryCard({ item, type, data, saved }: { item: ResearchEntry; ty
       <SaveButton entry={key} data={data} saved={saved} />
     </div>
     {item.maturity && <div className="mt-2"><Badge>{item.maturity}</Badge></div>}
+    {item.sourceIdeaId && item.stage && <div className="mt-2"><Badge tone="accent">{item.stage}</Badge></div>}
     {item.summary && <p className="mt-1.5 line-clamp-3 text-[14px] leading-relaxed text-ink-3">{item.summary}</p>}
     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-ink-4">
       {item.asOf && <span>证据截至 {stamp(item.asOf)}</span>}
@@ -102,11 +103,19 @@ function ResearchBody({ item, type, data }: { item: ResearchEntry; type: "ideas"
 export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"; data: Dashboard; item?: ResearchEntry }) {
   const saved = useSaved(data);
   const posts = postLookup(data);
+  const [params] = useSearchParams();
+  const ideaGroup = params.get("group") === "ideas";
+  const visible = type === "trends" ? data.trends.filter(e => Boolean(e.sourceIdeaId) === ideaGroup) : data.ideas;
+  const generation = type==="trends" && (ideaGroup || item?.sourceIdeaId) ? data.generation.ideaTrends : data.generation[type];
   const evidenceThrough = item && [...(item.evidence ?? []), ...(item.counterEvidence ?? []), ...(item.changeEvidence ?? [])]
     .map(id => posts.get(id)?.publishedAt).filter(Boolean).sort().at(-1);
   return <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
-    <Heading title={item?.title ?? nameOf[type]} back={item ? { to: `/${type}`, label: nameOf[type] } : undefined} />
-    {!item && <GenerationStatus generation={data.generation[type]} />}
+    <Heading title={item?.title ?? nameOf[type]} back={item ? { to: item.sourceIdeaId ? "/trends?group=ideas" : `/${type}`, label: nameOf[type] } : undefined} />
+    {!item && <GenerationStatus generation={generation} />}
+    {!item && type === "trends" && <nav className="mb-5 flex flex-wrap gap-2" aria-label="趋势分组">
+      <Link to="/trends" className={`rounded-full px-4 py-2 text-sm ${!ideaGroup ? "bg-accent text-white" : "bg-surface text-ink-2"}`}>常规趋势跟踪（{data.trends.filter(e=>!e.sourceIdeaId).length}）</Link>
+      <Link to="/trends?group=ideas" className={`rounded-full px-4 py-2 text-sm ${ideaGroup ? "bg-accent text-white" : "bg-surface text-ink-2"}`}>Idea 趋势跟踪（{data.trends.filter(e=>e.sourceIdeaId).length}）</Link>
+    </nav>}
     {item ? <>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-4">
         <span>最近引用原帖 {stamp(evidenceThrough ?? item.asOf)}</span>
@@ -116,6 +125,10 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
       {item.status === "archived" && <p className="mt-3 text-sm text-ink-4">此趋势已移出当前跟踪，以下为历史判断。</p>}
       {item.maturity && <div className="mt-3"><Badge tone="accent">{item.maturity}</Badge></div>}
       {type === "ideas" && item.summary && <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{item.summary}</p>}
+      {item.originalIdea && <section className="card mt-4 px-4 py-4"><p className="mb-2 text-sm font-medium text-ink-3">跟踪的原始 Idea · {stamp(item.originalIdea.asOf)}</p>
+        <Link className="font-semibold text-accent" to={`/ideas/${item.sourceIdeaId}`}>{item.originalIdea.title}</Link>
+        <Paragraph>{item.originalIdea.judgment}</Paragraph>
+      </section>}
       <ResearchBody item={item} type={type} data={data} />
       {item.history?.length ? <details className="mt-6 border-t border-line pt-4">
         <summary className="cursor-pointer font-medium">历史修订（{item.history.length}）</summary>
@@ -129,9 +142,9 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
           .filter((entry) => entry.id !== item.id && item.relatedIds?.includes(entry.id))
           .map((entry) => <EntryCard key={entry.id} item={entry} type={group} data={data} saved={saved} />))}</div>
       </Section> : null}
-      {data.generation[type]?.status === "failed" && <Section title="本轮生成状态"><GenerationStatus generation={data.generation[type]} /></Section>}
-    </> : data[type].length ? <div className="space-y-2">
-      {data[type].map((entry) => <EntryCard key={entry.id} item={entry} type={type} data={data} saved={saved} />)}
+      {generation?.status === "failed" && <Section title="本轮生成状态"><GenerationStatus generation={generation} /></Section>}
+    </> : visible.length ? <div className="space-y-2">
+      {visible.map((entry) => <EntryCard key={entry.id} item={entry} type={type} data={data} saved={saved} />)}
     </div> : <EmptyState title={`还没有${nameOf[type]}条目`} />}
   </div>;
 }

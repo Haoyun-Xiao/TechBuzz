@@ -17,7 +17,7 @@ const SCORING_VERSION = 2;
 const SCORE_MAX = { impact: 35, novelty: 25, verification: 25, followUp: 15 };
 const IDEA_VERSION = 3;
 const TREND_BATCH_VERSION = 2;
-const TREND_SYNTHESIS_VERSION = 4;
+const TREND_SYNTHESIS_VERSION = 5;
 const REPORT_VERSION = 7;
 const running = new Map();
 
@@ -920,6 +920,21 @@ function trendTimeline(raw, dateById, evidence, counterEvidence, notes, finalSum
 }
 
 const trendSynthesisPrompt = trendPrompt;
+const ideaTrackingInstructions = '\n本轮仅做Idea趋势跟踪。known中的每个prior代表一个已有投资假设，originalIdea保存原始假设、依据和验证条件；它是基线，不能当作新证据。每次最多更新4条最有实质变化的假设。必须选择prior，不得创建无对应Idea的趋势或合并不同Idea。先判断新信息是在增强、削弱、逆转还是尚未改变原假设；只针对相同经营机制的材料更新，证据不足返回空。标题扣住原Idea的行业/标的，trendOverview先讲原来押注什么，再讲这次证据改变什么；timeline展示有日期的验证进展，evidenceAndHypotheses说明尚缺的证据及下一步验证。原Idea可以跨公司或覆盖整个产业链。不要重写或改分原Idea。';
+
+export function ideaTrackingPrior(idea, existing) {
+  const prior=existing.find(e=>e.sourceIdeaId===idea.id && !e.mergedInto);
+  const originalIdea=prior?.originalIdea ?? {
+    id:idea.id, title:idea.title, judgment:idea.coreIdea||idea.thesis||idea.summary,
+    asOf:idea.asOf||idea.generatedAt, evidence:idea.evidence, counterEvidence:idea.counterEvidence,
+    verification:idea.actionAndWatch||idea.invalidation||idea.watchNext,
+  };
+  return { ...prior, id:prior?.id||'trend-idea-'+hash(idea.id).slice(0,16),
+    title:prior?.title||idea.title, status:'active', stage:prior?.stage||'初现',
+    summary:clean(prior?.summary||originalIdea.judgment,200), timeline:prior?.timeline||[],
+    sourceIdeaId:idea.id, originalIdea, currentIdea:(idea.coreIdea||idea.thesis||idea.summary)!==originalIdea.judgment ? {title:idea.title,judgment:idea.coreIdea||idea.thesis||idea.summary,asOf:idea.asOf||idea.generatedAt} : undefined };
+}
+
 
 // The cross-window model works on dated, already-validated observations. It selects
 // observation numbers; the server joins their original post IDs after validation.
@@ -938,10 +953,11 @@ async function synthesizeTrends(client, input) {
   const priorTrends = input.known.filter(item => item.id.startsWith('trend-'));
   const known = priorTrends.map((item, i) => ({
     n:i+1, title:item.title, status:item.status, stage:item.stage, summary:item.summary,
+    sourceIdeaId:item.sourceIdeaId, originalIdea:item.originalIdea, currentIdea:item.currentIdea,
     timeline:item.timeline?.map(node=>({date:node.date,summary:node.summary})),
   }));
   const raw = await client.complete({kind:'trends', webThrough:input.webThrough,
-    system:trendSynthesisPrompt,
+    system:trendSynthesisPrompt + (input.trackingMode === 'idea' ? ideaTrackingInstructions : ''),
     input:{windowStart:input.windowStart,windowEnd:input.windowEnd,observations,known},
   });
   const result = typeof raw === 'string' ? JSON.parse(raw.trim().replace(/^`{3}(?:json)?\s*|\s*`{3}$/gi,'')) : raw;
@@ -956,6 +972,9 @@ async function synthesizeTrends(client, input) {
     if (!Array.isArray(mergePriors) || mergePriors.some(n=>!Number.isInteger(n)||n<1||n>known.length||n===prior) || new Set(mergePriors).size!==mergePriors.length)
       throw new Error('合并趋势编号无效');
     if(mergePriors.length && !prior) throw new Error('合并须指定保留的既有趋势');
+    if(input.trackingMode==='idea' && (!prior || mergePriors.length)) throw new Error('Idea跟踪须选择已有假设，不能跨假设合并');
+    const sourceIdeaId=priorTrends[prior-1]?.sourceIdeaId;
+    const originalIdea=priorTrends[prior-1]?.originalIdea;
     const mergeIds=mergePriors.map(n=>priorTrends[n-1].id);
     const select = (numbers) => {
       if (!Array.isArray(numbers) || !numbers.length || numbers.some(n=>!line.observations.includes(n))) {
@@ -983,7 +1002,7 @@ async function synthesizeTrends(client, input) {
     const changesCited = new Set(timeline.flatMap(node => [...node.evidence, ...node.counterEvidence]));
     const changeEvidence = [...new Set([...refs(changes, 'evidence'), ...refs(changes, 'counterEvidence')])].filter(id => changesCited.has(id));
     if (!changeEvidence.length) throw new Error('趋势判断变化缺少时间线证据');
-    return {...line,mergeIds,id:priorTrends[prior-1]?.id,watchNext:line.evidenceAndHypotheses || line.next,evidence,counterEvidence,changeEvidence,timeline};
+    return {...line,mergeIds,sourceIdeaId,originalIdea,id:priorTrends[prior-1]?.id,watchNext:line.evidenceAndHypotheses || line.next,evidence,counterEvidence,changeEvidence,timeline};
   }).filter(Boolean);
   return {entries};
 }
@@ -1002,7 +1021,8 @@ function activeInWindow(posts, start, end) {
   }).sort((a,b)=>a.publishedMs-b.publishedMs || a.material.id.localeCompare(b.material.id));
 }
 
-async function makeTrends(db, client, posts, now) {
+async function makeTrends(db, client, posts, now, trackingMode = 'regular') {
+  const scope = trackingMode === 'idea' ? 'ideas' : 'current';
   transaction(db, () => {
     for(const entry of expiredTrends(readEntries(db,'trends'),now))
       putEntry(db,'trends',archiveEntry(entry,now,'超过30天没有新增内容'));
@@ -1013,11 +1033,11 @@ async function makeTrends(db, client, posts, now) {
   if (recent.some(({ assessment }) => !assessment)) return;
   const inputs = [client.signature, windowStart, windowEnd, recent.map(({ scoreHash }) => scoreHash)];
   const prior = db.prepare("SELECT input_hash, status FROM research_jobs WHERE kind='trends' AND scope='current'").get();
-  if (prior?.status === 'completed' && prior.input_hash === hash([TREND_BATCH_VERSION, ...inputs])
+  if (trackingMode === 'regular' && prior?.status === 'completed' && prior.input_hash === hash([TREND_BATCH_VERSION, ...inputs])
     && db.prepare("SELECT 1 FROM research_success WHERE kind='trends' AND scope LIKE 'replay:%' LIMIT 1").get()) return;
-  const fingerprint = hash([TREND_SYNTHESIS_VERSION, TREND_BATCH_VERSION, ...inputs]);
+  const fingerprint = hash([TREND_SYNTHESIS_VERSION, TREND_BATCH_VERSION, ...inputs, trackingMode, trackingMode==='idea' ? readEntries(db,'ideas').map(e=>[e.id,e.updatedAt,e.status]) : null]);
   const allowed = new Set(recent.map(({ material }) => material.id));
-  await runJob(db, 'trends', 'current', fingerprint, now, async () => {
+  await runJob(db, 'trends', scope, fingerprint, now, async () => {
     const get = db.prepare('SELECT value FROM research_trend_batches WHERE input_hash = ?');
     const put = db.prepare('INSERT OR REPLACE INTO research_trend_batches VALUES (?, ?)');
     const analysis = [];
@@ -1052,11 +1072,11 @@ async function makeTrends(db, client, posts, now) {
       hasThread ? clean(material.text || material.article?.text, 300) : assessment.summary,
     ]));
     const reduced = await reduceTrends(client, analysis, datedSources, get, put);
-    const updates = await publishTrendSynthesis(db, client, { windowStart, windowEnd, ...reduced }, notes, now);
+    const updates = await publishTrendSynthesis(db, client, { windowStart, windowEnd, ...reduced }, notes, now, undefined, trackingMode);
     return () => {
       for (const entry of readEntries(db, 'trends')) {
         const citations = [...entry.evidence, ...entry.counterEvidence];
-        if (entry.status === 'active' && !updates.has(entry.id) && !citations.some((id) => allowed.has(id))) {
+        if (Boolean(entry.sourceIdeaId)===(trackingMode==='idea') && entry.status === 'active' && !updates.has(entry.id) && !citations.some((id) => allowed.has(id))) {
           updates.set(entry.id, archiveEntry(entry, now, '近 30 天窗口内没有剩余证据'));
         }
       }
@@ -1065,20 +1085,22 @@ async function makeTrends(db, client, posts, now) {
   }, recent.length ? iso(recent.at(-1).publishedMs) : null);
 }
 
-async function publishTrendSynthesis(db, client, input, notes, now, trendId) {
+async function publishTrendSynthesis(db, client, input, notes, now, trendId, trackingMode = 'regular') {
   const existing = readEntries(db, 'trends');
-  const known = knownEntries(db, true).filter(entry => !trendId || entry.id === trendId || !entry.id.startsWith('trend-'));
+  const known = trackingMode === 'idea'
+    ? [...readEntries(db,'ideas').filter(e=>e.status==='active').map(idea=>ideaTrackingPrior(idea,existing)), ...knownEntries(db).filter(e=>e.id.startsWith('idea-'))]
+    : knownEntries(db,true).filter(entry => !existing.find(e=>e.id===entry.id)?.sourceIdeaId && (!trendId || entry.id===trendId || !entry.id.startsWith('trend-')));
   const relatedAllowed = new Set(known.map(({ id }) => id));
   const dateById = new Map(input.sources.map(({ id, date }) => [id, date]));
   const allowed = new Set(dateById.keys());
-  const result = input.analysis.length ? await synthesizeTrends(client, { ...input, known, webThrough:now }) : { entries: [] };
+  const result = input.analysis.length ? await synthesizeTrends(client, { ...input, known, trackingMode, webThrough:now }) : { entries: [] };
   const provenance = client.provenance(now, 'trends');
   const updates = new Map();
   const merges = [];
   for (const raw of objectArray(result, 'entries')) {
     const evidence = citations(raw.evidence, allowed);
     const counterEvidence = citations(raw.counterEvidence, allowed);
-    const prior = existing.find(entry => entry.id === raw.id || entry.title === clean(raw.title, 180));
+    const prior = existing.find(entry => Boolean(entry.sourceIdeaId)===(trackingMode==='idea') && (entry.id === raw.id || entry.title === clean(raw.title, 180)));
     if ((trendId && prior?.id !== trendId) || (raw.status === 'archived' && !prior)) continue;
     if (!trendId && prior?.changeEvidence?.length && raw.changeEvidence?.length
       && !raw.mergeIds?.length && raw.status !== 'archived' && raw.changeEvidence.every(id => prior.changeEvidence.includes(id))) continue;
@@ -1112,6 +1134,14 @@ async function publishTrendSynthesis(db, client, input, notes, now, trendId) {
         lastSignalAt:new Date(Math.max(latestSignal(prior??{}),...freshTimeline.map(n=>Date.parse(n.date)))).toISOString(), ...(raw.coreIdea && {researchFormat:2}), ...(raw.webSources && {webSources:raw.webSources}),
         timeline: [...timeline.values()].sort((a, b) => a.date.localeCompare(b.date)),
       });
+    if(raw.sourceIdeaId) {
+      next.id=raw.id;
+      next.sourceIdeaId=raw.sourceIdeaId;
+      next.originalIdea=raw.originalIdea;
+      next.trackingKind='idea';
+      next.relatedIds=[...new Set([...next.relatedIds,raw.sourceIdeaId])];
+      Object.assign(next.history.at(-1),{sourceIdeaId:next.sourceIdeaId,originalIdea:next.originalIdea,trackingKind:'idea',relatedIds:next.relatedIds});
+    }
     if (updates.has(next.id)) throw new Error('模型重复更新同一个趋势');
     updates.set(next.id, next);
     if(raw.mergeIds?.length) merges.push({target:next.id,ids:raw.mergeIds});
@@ -1284,10 +1314,10 @@ export async function runResearchModule(db, posts, kind) {
   }
   if (kind === 'ideas') {
     const scored = await scorePosts(db, client, rows, now);
-    if (scored.complete) await makeIdeas(db, client, scored.units, scored.rootIds, now, settings(db));
+    if (scored.complete && process.env.TECHBUZZ_IDEAS_ENABLED !== 'false') await makeIdeas(db, client, scored.units, scored.rootIds, now, settings(db));
     return;
   }
-  if (kind !== 'trends') throw new Error('Unknown research module');
+  if (!['trends','idea_trends'].includes(kind)) throw new Error('Unknown research module');
   let scored = await scorePosts(db, client, rows, now, true);
   if (beijingDate(now) !== beijingDate(Date.now()) && scored.rows.some(row => !row.assessment)) {
     // Historical scores must not overwrite current-day scores or aliases.
@@ -1301,7 +1331,7 @@ export async function runResearchModule(db, posts, kind) {
       scored = await scorePosts(historical, client, rows, now);
     } finally { historical.close(); }
   }
-  await makeTrends(db, client, scored.rows, now);
+  await makeTrends(db, client, scored.rows, now, kind==='idea_trends'?'idea':'regular');
 }
 
 export async function analyze(db, posts, options = {}) {

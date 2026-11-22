@@ -16,7 +16,7 @@ function generationStatus(db, analysis, now, rows) {
     let status=job?.status ?? 'pending';
     let error=job?.error ?? null;
     const scoring=analysis.jobs.find(j=>j.kind==='score' && j.scope==='current');
-    if(kind !== 'report' && status !== 'running' && scoring && ['running','failed'].includes(scoring.status) && (!updatedAt || scoring.updatedAt>=updatedAt)) {
+    if(kind !== 'report' && status !== 'running' && status !== 'disabled' && scoring && ['running','failed'].includes(scoring.status) && (!updatedAt || scoring.updatedAt>=updatedAt)) {
       updatedAt=scoring.updatedAt;
       if(scoring.status==='failed') {
         status='failed';
@@ -43,7 +43,7 @@ function generationStatus(db, analysis, now, rows) {
   }
   if(!due) {daily.status='scheduled';daily.error=null;}
   else if(report?.inputCount===0 && !report.sections?.length && daily.status==='completed') daily.status='insufficient';
-  return {ideas:state('ideas','current',analysis.ideas),trends,report:{...daily,date}};
+  return {ideas:state('ideas','current',analysis.ideas),trends,ideaTrends:state('trends','ideas',analysis.trends.filter(e=>e.sourceIdeaId)),report:{...daily,date}};
 }
 
 export function dashboard(db, now = new Date()) {

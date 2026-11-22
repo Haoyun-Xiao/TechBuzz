@@ -34,6 +34,7 @@ const SECTIONS: Array<{ title: string; items: NavItem[] }> = [
   {
     title: "更多",
     items: [
+      { to: "/assistant", label: "研究助手", icon: IconSparkles },
       { to: "/agent", label: "Agent 接入", icon: IconPlug },
       { to: "/about", label: "关于", icon: IconHeart },
     ],
@@ -49,12 +50,13 @@ const RESEARCH_TABS: Tab[] = [
   { key: "ideas", to: "/ideas", label: "Idea", icon: IconSparkles },
   { key: "trends", to: "/trends", label: "趋势跟踪", icon: IconTrendUp },
   { key: "starred", to: "/starred", label: "收藏", icon: IconBookmark },
-  { key: "me", to: "/more", label: "更多", icon: IconMore, covers: ["/sources", "/agent", "/about"] },
+  { key: "me", to: "/more", label: "更多", icon: IconMore, covers: ["/sources", "/assistant", "/agent", "/about"] },
 ];
 
 const RESEARCH_MORE: NavItem[] = [
   { to: "/sources", label: "关注来源", icon: IconUsers },
-  { to: "/agent", label: "Agent 接入", icon: IconPlug },
+  { to: "/assistant", label: "研究助手", icon: IconSparkles },
+      { to: "/agent", label: "Agent 接入", icon: IconPlug },
   { to: "/about", label: "关于", icon: IconHeart },
 ];
 

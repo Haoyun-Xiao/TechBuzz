@@ -1,3 +1,4 @@
+import { AskAssistant } from "../features/assistant/AskAssistant";
 import { data, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/research-entry";
 import type { Screen } from "../components/shell/screens";
@@ -58,7 +59,7 @@ function ResearchPost({ post, activity, dashboard }: { post: Post; activity?: Ac
 
 export default function ResearchEntryRoute() {
   const result = useLoaderData<typeof loader>();
-  if (result.section === "research") return <ResearchPost {...result} />;
+  if (result.section === "research") return <><AskAssistant type="post" id={result.post.id} /><ResearchPost {...result} /></>;
   if (result.section === "sources") return <ResearchSources data={result.dashboard} />;
-  return <ResearchEntries type={result.section === "trends" ? "trends" : "ideas"} data={result.dashboard} item={result.entry} />;
+  return <>{result.entry && <AskAssistant type={result.section} id={result.entry.id} />}<ResearchEntries type={result.section === "trends" ? "trends" : "ideas"} data={result.dashboard} item={result.entry} /></>;
 }

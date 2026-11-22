@@ -143,6 +143,12 @@ async function handle(req: import("node:http").IncomingMessage, res: import("nod
   const pathname = qi >= 0 ? raw.slice(0, qi) : raw;
   const search = qi >= 0 ? raw.slice(qi) : "";
 
+  if (pathname.startsWith("/api/assistant/")) {
+    const target = process.env.TECHBUZZ_ASSISTANT_URL;
+    if (!target) { res.writeHead(503, { "Content-Type": "application/json" }); res.end(JSON.stringify({error:"研究助手尚未启用"})); return; }
+    proxyToApi(req, res, {}, new URL(target));
+    return;
+  }
   if (proxyResearch(req, res, pathname, search)) return;
 
   const decision = resolveRedirect(pathname, search);

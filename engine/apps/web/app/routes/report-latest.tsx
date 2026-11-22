@@ -1,3 +1,4 @@
+import { AskAssistant } from "../features/assistant/AskAssistant";
 import { redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/report-latest";
 import { REPORT_NAMES, reportDateLabel, type ReportLatestPage } from "@techbuzz/contracts/site";
@@ -59,7 +60,7 @@ export function meta({ loaderData }: Route.MetaArgs) {
 
 export default function ReportLatestPage() {
   const result = useLoaderData<typeof loader>();
-  if ("research" in result) return <ResearchDaily {...result.research} />;
+  if ("research" in result) return <>{result.research.report && <AskAssistant type="reports" id={"report-" + result.research.report.key} />}<ResearchDaily {...result.research} /></>;
   const { kind, report, index, today } = result;
   return (
     <ReportLayout kind={kind} index={index} current={report?.key ?? null} today={today} outline={report ? reportOutline(report) : []}>

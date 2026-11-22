@@ -29,6 +29,7 @@ export function proxyToApi(req: IncomingMessage, res: ServerResponse, set: Outgo
     res.statusCode = 502;
     res.end("api unavailable");
   });
+  res.on("close", () => { if (!res.writableFinished) upstream.destroy(); });
   req.pipe(upstream);
 }
 

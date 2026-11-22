@@ -44,6 +44,7 @@ export default [
   route("trends/:id?", "routes/research-entry.tsx", { id: "research-trends" }),
   route("sources", "routes/research-entry.tsx", { id: "research-sources" }),
   route("starred/lookup", "routes/starred-lookup.ts"),
+  route("assistant", "routes/assistant.tsx"),
   route("agent", "routes/agent.tsx"),
   ...modulePages,
   // The modules' admin pages (ModulePage.admin), for the admins a site module names, in their own back-office shell.

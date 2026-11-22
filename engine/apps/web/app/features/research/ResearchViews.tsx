@@ -128,6 +128,8 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
         <span>{item.trackingStatus==="awaiting-evidence" ? "跟踪建立" : "本条生成"} {stamp(item.generatedAt || item.updatedAt)}</span>
         <span className="ml-auto"><SaveButton entry={`${type}/${item.id}`} data={data} saved={saved} /></span>
       </div>
+      {type === "ideas" && data.trends.filter(t=>t.sourceIdeaId===item.id).map(t=>
+        <p key={t.id} className="mt-3 text-sm"><Link className="text-accent" to={`/trends/${t.id}`}>查看此 Idea 的验证进展 ↗</Link></p>)}
       {item.status === "archived" && <p className="mt-3 text-sm text-ink-4">此趋势已移出当前跟踪，以下为历史判断。</p>}
       {item.maturity && <div className="mt-3"><Badge tone="accent">{item.maturity}</Badge></div>}
       {type === "ideas" && item.summary && <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{item.summary}</p>}

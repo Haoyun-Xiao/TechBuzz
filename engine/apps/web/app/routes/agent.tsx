@@ -46,6 +46,7 @@ const anchorHref = (id: string) => `${hrefOf(ANCHORS.get(id)!)}#${id}`;
 
 /** Machine-readable entry points, with what each one is for. */
 const RESOURCES: Array<[label: string, href: string, note: string]> = [
+  ["研究助手", "/assistant", "在本站对话：检索原帖、研究判断与趋势，按需联网核验"],
   ["llms.txt", "/llms.txt", "给大模型读的站点说明"],
   ["Agent 使用说明", "/api/v1/agent", `Agent 读了就能查${GUIDE_CLIENTS ? `，${GUIDE_CLIENTS} 用的也是它` : ""}`],
   ["OpenAPI 3.1", "/openapi-v1.json", `REST API 的完整定义 · ${V}`],

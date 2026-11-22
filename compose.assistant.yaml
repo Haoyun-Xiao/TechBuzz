@@ -1,0 +1,41 @@
+name: techbuzz-assistant-preview
+services:
+  assistant:
+    image: techbuzz-engine:local
+    command: ["node", "/assistant/server.mjs"]
+    init: true
+    restart: unless-stopped
+    environment:
+      TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:?set model base URL}
+      TECHBUZZ_LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:?set model key}
+      TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:?set model name}
+      TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
+      TECHBUZZ_RESEARCH_URL: http://techbuzz-research-1:3000
+      TECHBUZZ_ASSISTANT_DB: /data/assistant.sqlite
+    volumes:
+      - ./assistant:/assistant:ro
+      - assistant-data:/data
+    networks: [default, techbuzz-read]
+  web:
+    build: ./engine
+    image: techbuzz-assistant-web:local
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      SITE_URL: http://127.0.0.1:19283
+      API_BASE_URL: http://techbuzz-api-1:3001
+      TECHBUZZ_RESEARCH_URL: http://techbuzz-research-1:3000
+      TECHBUZZ_ASSISTANT_URL: http://assistant:3002
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: '3000'
+    ports: ["127.0.0.1:19283:3000"]
+    networks: [default, techbuzz-read]
+    depends_on: [assistant]
+    command: ["node", "apps/web/server.ts"]
+networks:
+  techbuzz-read:
+    external: true
+    name: techbuzz_default
+volumes:
+  assistant-data:

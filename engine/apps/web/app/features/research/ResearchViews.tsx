@@ -112,6 +112,8 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
   const [params] = useSearchParams();
   const ideaGroup = params.get("group") === "ideas";
   const visible = type === "trends" ? data.trends.filter(e => Boolean(e.sourceIdeaId) === ideaGroup) : data.ideas;
+  const waiting = type === "trends" && ideaGroup ? visible.filter(e=>e.trackingStatus==="awaiting-evidence") : [];
+  const shown = visible.filter(e=>!waiting.includes(e));
   const generation = type==="trends" && (ideaGroup || item?.sourceIdeaId) ? data.generation.ideaTrends : data.generation[type];
   const evidenceThrough = item && [...(item.evidence ?? []), ...(item.counterEvidence ?? []), ...(item.changeEvidence ?? [])]
     .map(id => posts.get(id)?.publishedAt).filter(Boolean).sort().at(-1);
@@ -155,9 +157,13 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
           .map((entry) => <EntryCard key={entry.id} item={entry} type={group} data={data} saved={saved} />))}</div>
       </Section> : null}
       {generation?.status === "failed" && <Section title="本轮生成状态"><GenerationStatus generation={generation} /></Section>}
-    </> : visible.length ? <div className="space-y-2">
-      {visible.map((entry) => <EntryCard key={entry.id} item={entry} type={type} data={data} saved={saved} />)}
-    </div> : <EmptyState title={`还没有${nameOf[type]}条目`} />}
+    </> : shown.length ? <div className="space-y-2">
+      {shown.map((entry) => <EntryCard key={entry.id} item={entry} type={type} data={data} saved={saved} />)}
+    </div> : <EmptyState title={waiting.length ? "尚无新的验证结论" : `还没有${nameOf[type]}条目`} />}
+    {!item && waiting.length > 0 && <details className="mt-5 border-t border-line pt-4">
+      <summary className="cursor-pointer text-sm text-ink-3">待验证的 Idea（{waiting.length}）</summary>
+      <div className="mt-3 space-y-2">{waiting.map(entry=><EntryCard key={entry.id} item={entry} type="trends" data={data} saved={saved} />)}</div>
+    </details>}
   </div>;
 }
 

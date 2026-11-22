@@ -101,7 +101,7 @@ test("research client navigation reads the same collection as direct page loads"
     posts: [], scores: {}, activities: [], featured: [], hot: [], singleHot: [], topics: [],
     sources: [{handle:"OnlySource",status:"ok"}],
     ideas: [entry("idea-only","Unique investment hypothesis")],
-    trends: [entry("trend-only","Unique industry timeline"),entry("trend-follow","Unique hypothesis follow-up","idea-only")],
+    trends: [entry("trend-only","Unique industry timeline"),entry("trend-follow","Unique hypothesis follow-up","idea-only"),{...entry("trend-pending","Pending baseline","idea-only"),trackingStatus:"awaiting-evidence"}],
     reports: [], threshold:70,
     generation:{ideas:{status:"completed"},trends:{status:"completed"},ideaTrends:{status:"completed"},report:{status:"completed"}},
     generatedAt:"2026-11-23T00:00:00Z",
@@ -114,6 +114,10 @@ test("research client navigation reads the same collection as direct page loads"
       assert.match(body,/Unique industry timeline|Unique hypothesis follow-up/);
       assert.doesNotMatch(body,/Unique investment hypothesis/);
     }
+    const grouped=cheerio.load(await fetch(live.origin+"/trends?group=ideas").then(r=>r.text()));
+    const pending=grouped("main details").filter((_,el)=>grouped(el).find("summary").text().includes("待验证的 Idea"));
+    assert.equal(pending.length,1);assert.equal(pending.attr("open"),undefined);
+    assert.match(pending.text(),/Pending baseline/);
     const ideas=await fetch(live.origin+"/ideas.data").then(r=>r.text());
     assert.match(ideas,/Unique investment hypothesis/);
     assert.doesNotMatch(ideas,/Unique industry timeline|Unique hypothesis follow-up/);

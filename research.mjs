@@ -697,6 +697,21 @@ function ideaSnapshot(entry, materials) {
   };
 }
 
+export function ideaV3Fields(raw, authors = {}) {
+  if(['pitch','variantView','catalystAndKillSwitch','nextDD','targetScope','horizon'].some(key=>!clean(raw[key],1800))
+    || !['潜在多头','潜在空头','相对机会','事件博弈','规避'].includes(raw.stance)
+    || !Array.isArray(raw.watchVariables) || raw.watchVariables.length>3
+    || raw.watchVariables.some(v=>!v || ['name','supportIf','invalidateIf'].some(k=>!clean(v[k]))))
+    throw new Error('Idea V3 字段不完整');
+  const readable=value=>String(value??'').replace(/\bP\d+\b(?:作者)?/g,ref=>authors[ref.replace('作者','')] ? '@'+authors[ref.replace('作者','')] : ref);
+  const text=Object.fromEntries(['pitch','variantView','catalystAndKillSwitch','nextDD'].map(k=>[k,ideaPublicText(readable(raw[k]),3000)]));
+  return {...text,researchFormat:3,stance:raw.stance,targetScope:clean(raw.targetScope,300),horizon:clean(raw.horizon,200),
+    watchVariables:raw.watchVariables.map(v=>Object.fromEntries(['name','supportIf','invalidateIf'].map(k=>[k,ideaPublicText(v[k],600)]))),
+    thesis:text.pitch,watchNext:text.nextDD,invalidation:text.catalystAndKillSwitch,
+    coreIdea:'',evidenceBase:'',industryContext:'',actionAndWatch:'',
+    facts:'',authorView:'',inference:'',risk:'',catalyst:''};
+}
+
 async function makeIdeas(db, client, posts, rootIds, now, { threshold, thresholdVersion }, options = {}) {
   const scope = options.targetId ? `replay:${options.targetId}` : 'current';
   const existing = readEntries(db, 'ideas');
@@ -775,13 +790,7 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
           const cleanTitle = ideaPublicText(raw.title, 180);
           if (raw.coreIdea && ['evidenceBase','industryContext','actionAndWatch'].some(key=>!clean(raw[key],1800)))
             throw new Error('Idea 缺少完整的四块研究正文');
-          if(raw.pitch) {
-            if(['variantView','catalystAndKillSwitch','nextDD','targetScope','horizon'].some(key=>!clean(raw[key],1800))
-              || !['潜在多头','潜在空头','相对机会','事件博弈','规避'].includes(raw.stance)
-              || !Array.isArray(raw.watchVariables) || raw.watchVariables.length>3
-              || raw.watchVariables.some(v=>!v || ['name','supportIf','invalidateIf'].some(k=>!clean(v[k]))))
-              throw new Error('Idea V3 字段不完整');
-          }
+          const v3=raw.pitch ? ideaV3Fields(raw,Object.fromEntries(materialGroup.map((row,i)=>['P'+(i+1),row.material.handle]))) : {};
           const prior = readEntries(db, 'ideas').find(item => item.id === raw.id || item.title === cleanTitle);
           const newEvidence = citations(raw.evidence, allowed);
           const newCounters = citations(raw.counterEvidence, allowed);
@@ -821,7 +830,7 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
           };
           const next = entryUpdate(cleaned, prior, evidence, counterEvidence, relatedAllowed, now, {
             ...fields, ...(raw.coreIdea && {researchFormat:2}),
-            ...(raw.pitch && {researchFormat:3,stance:clean(raw.stance,40),targetScope:clean(raw.targetScope,300),horizon:clean(raw.horizon,200),watchVariables:raw.watchVariables??[]}), ...(raw.webSources && {webSources:raw.webSources}), maturity, threshold, thresholdVersion, provenance,
+            ...v3, ...(raw.webSources && {webSources:raw.webSources}), maturity, threshold, thresholdVersion, provenance,
             previousJudgment: ideaPublicText(raw.revision?.previousJudgment,600),
             newEvidence: ideaPublicText(raw.revision?.newEvidence,600),
             change: ideaPublicText(raw.revision?.change,600),

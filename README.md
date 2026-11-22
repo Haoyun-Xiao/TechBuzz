@@ -45,7 +45,7 @@ node --env-file=.env replay-trend.mjs /path/to/review.sqlite <trend-id> <as-of-I
 
 ## 研究提示词与生命周期
 
-三套生成提示词集中在 `research-prompts.mjs`，采用 Gemini V2 的四块 Idea、三块趋势与充实日报结构。Idea 可以围绕行业或产业链的同一个投资问题更新，保存 `coreIdea/evidenceBase/industryContext/actionAndWatch`；趋势保存 `trendOverview/timeline/evidenceAndHypotheses`。旧记录仍可阅读。
+三套生成提示词集中在 `research-prompts.mjs`，Idea 采用 V3 的核心下注、依据与预期差、兑现与失效、优先尽调四块正文，保存 `pitch/variantView/catalystAndKillSwitch/nextDD`，并记录方向、对象、兑现窗口和跟踪变量。趋势与日报沿用已验收的 Gemini V2 结构。Idea 可以围绕行业或产业链的同一个投资问题更新；趋势保存 `trendOverview/timeline/evidenceAndHypotheses`。旧记录仍可阅读。
 
 趋势依据最近新增信息日期执行 30 天清理，移出当前列表并保留历史链接。模型可用 `mergePriors` 把相近趋势并入指定 `prior`，合并证据及时间线，旧 ID 指向保留的主条目。旧内容重新生成不会延长活跃期。读者打开页面只读取结果。
 
@@ -68,10 +68,12 @@ python3 engine/scripts/offline/export.py ~/Downloads/TechBuzz.html
 
 趋势页分为常规趋势与 Idea 趋势跟踪。后者读取已有 Idea 的假设、验证条件和滚动窗口观察，保存原始判断，并通过稳定的 `sourceIdeaId` 关联原 Idea。两组独立记录任务状态，共用已缓存的分批观察。Idea 跟踪更新单独的趋势记录。
 
-本机 `TECHBUZZ_IDEAS_ENABLED=false` 暂停 Idea 自动生成，评分、翻译、日报与两组趋势照常运行。调整好 Idea 提示词后，设为 `true` 并重建研究 worker 即可恢复。
+`TECHBUZZ_IDEAS_ENABLED=true` 启用 Idea 自动生成。设为 `false` 可暂停 Idea 生成，评分、翻译、日报与两组趋势继续运行。
 
 ### 本地研究助手
 
 主站侧栏“研究助手”位于 `/assistant`，复用八账号材料和当前模型配置，支持多轮追问、完整原文读取、按需联网及引用回查。
 助手独立运行在 Compose 的 `assistant` 服务，聊天记录保存在 `assistant-data`，不写入 Idea、趋势、日报或采集数据库。
 已有的 `/agent`、MCP 和只读 API 保留。配置与接口见 [助手说明](assistant/README.md)，本次合并与回退见 [本地合并记录](docs/ASSISTANT_LOCAL_MERGE.md)。
+
+Idea V3 按新增信号的具体议题和经营变量组包，补入最近30天相关上下文与低分材料。背景单元不具备新建资格，输出必须引用本轮触发帖；历史材料不会因此被标成新处理。对话研究助手的详情接口可读取完整 V3 字段，Idea 趋势跟踪同步获得假设与验证变量。

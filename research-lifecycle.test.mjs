@@ -83,3 +83,24 @@ test('V3 ideas immediately get one explicit pending tracking baseline without fa
  assert(result.ideas[0].relatedIds.includes(t.id));
  db.close();
 });
+
+test('a same-cutoff trend pass preserves fresh pending baselines instead of archiving empty evidence',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');
+ const {initResearch,analyze,ensureIdeaTracking,runTrendModules,research}=await import('./research.mjs');
+ const db=new DatabaseSync(':memory:');initResearch(db);const now=Date.parse('2026-11-23T01:00:00+08:00');
+ const complete=async({kind,input})=>{
+  if(kind==='score')return {scores:input.posts.map(p=>({id:p.id,breakdown:{impact:30,novelty:20,verification:20,followUp:10},reason:'披露',summary:'融资',strength:'high',companies:[],topics:[],event:'融资'}))};
+  if(kind==='trend_batch')return {signals:[{title:'融资',summary:'已披露融资',evidence:['p1'],counterEvidence:[]}]};
+  return {entries:[]};
+ };
+ const posts=[{id:'p1',handle:'source',text:'financing',publishedAt:'2026-11-22T00:00:00Z'}];
+ await analyze(db,posts,{now:new Date(now).toISOString(),complete});
+ const idea={id:'idea-new',title:'假设',pitch:'检验回报',status:'active',researchFormat:3,asOf:new Date(now).toISOString(),updatedAt:new Date(now).toISOString(),evidence:['p1'],counterEvidence:[],relatedIds:[]};
+ db.prepare('insert into research_ideas values (?,?)').run(idea.id,JSON.stringify(idea));
+ ensureIdeaTracking(db,idea,now);
+ await runTrendModules(db,posts,now,{complete});
+ assert.equal(research(db).trends.length,1);
+ assert.equal(research(db).trends[0].trackingStatus,'awaiting-evidence');
+ assert.equal(research(db).archivedTrends.length,0);
+ db.close();
+});

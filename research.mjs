@@ -1366,8 +1366,8 @@ export async function refreshIdeas(db, posts, now = Date.now()) {
   if(!ok)throw new Error(db.prepare("SELECT error FROM research_jobs WHERE kind='ideas' AND scope='current'").get()?.error||'Idea生成未完成');
 }
 
-export async function runTrendModules(db, posts, now = Date.now()) {
-  const client=modelClient(db,{});
+export async function runTrendModules(db, posts, now = Date.now(), options = {}) {
+  const client=modelClient(db,options);
   const scored=await scorePosts(db,client,knownPosts(posts,now),now,true);
   const end=beijingDate(now),start=dayStart(end)-29*DAY;
   const recent=activeInWindow(scored.rows,start,now+1);

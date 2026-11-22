@@ -37,6 +37,10 @@ function generationStatus(db, analysis, now, rows) {
   }
   const report=analysis.reports.find(r=>r.date===date);
   const daily=state('report',date,report?[report]:[]);
+  if (report?.generatedAt) {
+    daily.lastSuccessAt = report.generatedAt;
+    if (daily.status === 'completed') daily.updatedAt = report.generatedAt;
+  }
   if(!due) {daily.status='scheduled';daily.error=null;}
   else if(report?.inputCount===0 && !report.sections?.length && daily.status==='completed') daily.status='insufficient';
   return {ideas:state('ideas','current',analysis.ideas),trends,report:{...daily,date}};

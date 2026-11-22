@@ -64,14 +64,14 @@ export function dailyPage(data: Dashboard, index: ReportNavigationEntry[], entry
 export function ResearchDaily({ data, index, report, asOf, coverage, related = [] }: { data: Dashboard; index: ReportNavigationEntry[]; report: ReportDetail | null; asOf?: string; coverage?: ResearchEntry["coverage"]; related?: Array<{id:string;title:string}> }) {
   const saved = useSaved(data);
   return <ReportLayout kind="daily" index={index} current={report?.key ?? null} today={beijingDate(data.generatedAt)} dailyOnly outline={report ? reportOutline(report, true) : []}>
-    <GenerationStatus generation={data.generation.report} />
+    {(!report || data.generation.report?.date === report.key) && <GenerationStatus generation={data.generation.report} />}
     {report ? <>
       <div className="mb-3 flex flex-wrap items-center gap-x-4 text-[13px] text-ink-4">
-        {asOf && <span>本期证据截至 {stamp(asOf)}</span>}
+        {coverage ? <span>原定生成 {stamp(coverage.scheduledAt)}</span> : asOf && <span>研究截至 {stamp(asOf)}</span>}
         <span>本期生成 {stamp(report.generatedAt)}</span>
         <span className="ml-auto"><SaveButton entry={`reports/${report.key}`} data={data} saved={saved} /></span>
       </div>
-      {coverage && <p className="mb-4 text-sm text-ink-3">历史补录复盘 · 材料可见截至 {stamp(coverage.cutoff)}；其中 {coverage.laterCount} 条在原定生成时间后收录。日期按原帖发布时间归属。</p>}
+      {coverage && <p className="mb-4 text-sm text-ink-3">历史复盘 · 材料可见截至 {stamp(coverage.cutoff)}。{coverage.laterCount ? `本期有 ${coverage.laterCount} 条原帖在原定生成时间后补录。` : "本期材料均在原定生成时间前收录。"}</p>}
       <ReportPaper report={report} index={index} itemPath={postPath} keepSummary />
       {related.length > 0 && <section className="mt-6"><h2 className="font-semibold">本期讨论的研究</h2><ul>{related.map(item => <li key={item.id}><Link className="text-accent" to={`/${item.id.startsWith("trend-") ? "trends" : "ideas"}/${item.id}`}>{item.title}</Link></li>)}</ul></section>}
     </> : <EmptyState title="还没有发布日报" />}

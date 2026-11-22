@@ -42,6 +42,10 @@ def clean(root):
         href = a["href"].removeprefix(base)
         if href.startswith("/") and not href.startswith("//"):
             a["href"] = "#" + href
+    for svg_image in root.select("svg image[href]"):
+        href = svg_image["href"]
+        if href.startswith("/") and href.endswith(".svg"):
+            svg_image["href"] = "data:image/svg+xml;base64," + base64.b64encode(read(href)).decode()
     for img in root.select("img"):
         if img.get("src") == "/logo.svg":
             img["src"] = logo

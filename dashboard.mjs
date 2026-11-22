@@ -41,7 +41,7 @@ function generationStatus(db, analysis, now, rows) {
     daily.lastSuccessAt = report.generatedAt;
     if (daily.status === 'completed') daily.updatedAt = report.generatedAt;
   }
-  if(!due) {daily.status='scheduled';daily.error=null;}
+  if(!due && !report) {daily.status='scheduled';daily.error=null;}
   else if(report?.inputCount===0 && !report.sections?.length && daily.status==='completed') daily.status='insufficient';
   return {ideas:state('ideas','current',analysis.ideas),trends,ideaTrends:state('trends','ideas',analysis.trends.filter(e=>e.sourceIdeaId)),report:{...daily,date}};
 }

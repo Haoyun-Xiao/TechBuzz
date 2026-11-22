@@ -955,7 +955,7 @@ function trendTimeline(raw, dateById, evidence, counterEvidence, notes, finalSum
   return [...timeline.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
-const trendSynthesisPrompt = trendPrompt;
+const trendSynthesisPrompt = trendPrompt + '\n常规趋势采用简版：按研究价值排序，最多输出两条最重要的主线。每段讲清关键变化即可，不为凑数补条目。';
 const ideaTrackingInstructions = '\n本轮仅做Idea趋势跟踪。known中的每个prior代表一个已有投资假设，originalIdea保存原始假设、依据和验证条件；它是基线，不能当作新证据。每次最多更新4条最有实质变化的假设。必须选择prior，不得创建无对应Idea的趋势或合并不同Idea。先判断新信息是在增强、削弱、逆转还是尚未改变原假设；只针对相同经营机制的材料更新，证据不足返回空。标题扣住原Idea的行业/标的，trendOverview先讲原来押注什么，再讲这次证据改变什么；timeline展示有日期的验证进展，evidenceAndHypotheses说明尚缺的证据及下一步验证。原Idea可以跨公司或覆盖整个产业链。不要重写或改分原Idea。';
 
 export function ensureIdeaTracking(db, idea, now = Date.now()) {
@@ -1013,7 +1013,7 @@ async function synthesizeTrends(client, input) {
     timeline:item.timeline?.map(node=>({date:node.date,summary:node.summary})),
   }));
   const raw = await client.complete({kind:'trends', webThrough:input.webThrough,
-    system:trendSynthesisPrompt + (input.trackingMode === 'idea' ? ideaTrackingInstructions : ''),
+    system:input.trackingMode === 'idea' ? trendPrompt + ideaTrackingInstructions : trendSynthesisPrompt,
     input:{windowStart:input.windowStart,windowEnd:input.windowEnd,observations,known},
   });
   const result = typeof raw === 'string' ? JSON.parse(raw.trim().replace(/^`{3}(?:json)?\s*|\s*`{3}$/gi,'')) : raw;
@@ -1143,12 +1143,14 @@ async function makeTrends(db, client, posts, now, trackingMode = 'regular', getP
 async function publishTrendSynthesis(db, client, input, notes, now, trendId, trackingMode = 'regular') {
   const existing = readEntries(db, 'trends');
   const known = trackingMode === 'idea'
-    ? [...readEntries(db,'ideas').filter(e=>e.status==='active').map(idea=>ideaTrackingPrior(idea,existing)), ...knownEntries(db).filter(e=>e.id.startsWith('idea-'))]
+    ? [...readEntries(db,'ideas').filter(e=>e.status==='active').map(idea=>ideaTrackingPrior(idea,existing))
+      .filter(prior=>Date.parse(prior.originalIdea.asOf)!==now), ...knownEntries(db).filter(e=>e.id.startsWith('idea-'))]
     : knownEntries(db,true).filter(entry => !existing.find(e=>e.id===entry.id)?.sourceIdeaId && (!trendId || entry.id===trendId || !entry.id.startsWith('trend-')));
   const relatedAllowed = new Set(known.map(({ id }) => id));
   const dateById = new Map(input.sources.map(({ id, date }) => [id, date]));
   const allowed = new Set(dateById.keys());
-  const result = input.analysis.length ? await synthesizeTrends(client, { ...input, known, trackingMode, webThrough:now }) : { entries: [] };
+  const hasCandidates=trackingMode!=='idea'||known.some(e=>e.id.startsWith('trend-'));
+  const result = input.analysis.length && hasCandidates ? await synthesizeTrends(client, { ...input, known, trackingMode, webThrough:now }) : { entries: [] };
   const provenance = client.provenance(now, 'trends');
   const updates = new Map();
   const merges = [];

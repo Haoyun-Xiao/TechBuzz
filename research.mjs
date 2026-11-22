@@ -1205,7 +1205,20 @@ async function publishTrendSynthesis(db, client, input, notes, now, trendId, tra
     updates.set(next.id, next);
     if(raw.mergeIds?.length) merges.push({target:next.id,ids:raw.mergeIds});
   }
-  return mergeTrendUpdates(updates,existing,merges,now);
+  mergeTrendUpdates(updates,existing,merges,now);
+  if(trackingMode==='regular'){
+    const current=new Map(existing.map(entry=>[entry.id,entry]));
+    for(const [id,entry] of updates)current.set(id,entry);
+    const priority=[...updates.values(),...existing.slice().sort((a,b)=>(b.updatedAt??'').localeCompare(a.updatedAt??''))];
+    const keep=new Set([...new Set(priority.filter(entry=>{
+      const latest=current.get(entry.id);
+      return latest.status==='active'&&!latest.sourceIdeaId;
+    }).map(entry=>entry.id))].slice(0,2));
+    for(const entry of current.values())
+      if(entry.status==='active'&&!entry.sourceIdeaId&&!keep.has(entry.id))
+        updates.set(entry.id,archiveEntry(entry,now,'简版仅保留两条当期重点，其余作为历史记录保留'));
+  }
+  return updates;
 }
 
 export async function replayTrend(db, posts, { trendId, postIds, focusIds, asOf }) {

@@ -66,7 +66,10 @@ export interface Activity {
   category: string | null;
 }
 
+export interface WebSource { title: string; url: string; date: string }
+
 export interface EvidenceEntry {
+  webSources?: WebSource[];
   previousJudgment?: string;
   newEvidence?: string;
   change?: string;
@@ -82,6 +85,16 @@ export interface EvidenceEntry {
 }
 
 export interface ResearchEntry extends EvidenceEntry {
+  coreIdea?: string;
+  evidenceBase?: string;
+  industryContext?: string;
+  actionAndWatch?: string;
+  trendOverview?: string;
+  evidenceAndHypotheses?: string;
+  mergedInto?: string;
+  mergedFrom?: string[];
+  lastSignalAt?: string;
+  researchFormat?: number;
   id: string;
   title: string;
   asOf?: string;
@@ -163,6 +176,7 @@ export interface Dashboard {
   featured: Activity[];
   ideas: ResearchEntry[];
   trends: ResearchEntry[];
+  archivedTrends?: ResearchEntry[];
   reports: ResearchEntry[];
   hot: HotEntry[];
   singleHot: HotEntry[];

@@ -1,4 +1,4 @@
-import { data, useLoaderData } from "react-router";
+import { data, redirect, useLoaderData } from "react-router";
 import type { Route } from "./+types/research-entry";
 import type { Screen } from "../components/shell/screens";
 import { entryCards, entryEvidence, evidenceSubset, loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
@@ -31,7 +31,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     }) });
   }
   const type = section === "trends" ? "trends" : "ideas";
-  const entry = params.id ? dashboard[type].find((item) => item.id === params.id) : undefined;
+  const entry = params.id ? [...dashboard[type], ...(type === "trends" ? dashboard.archivedTrends ?? [] : [])].find((item) => item.id === params.id) : undefined;
+  if (entry?.mergedInto) throw redirect("/trends/" + encodeURIComponent(entry.mergedInto), 302);
   if (params.id && !entry) throw data({ message: "not_found" }, { status: 404 });
   const related = new Set(entry?.relatedIds);
   return researchPage({ section: type as "ideas" | "trends", entry, path: url.pathname, dashboard: project(dashboard, {

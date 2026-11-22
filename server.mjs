@@ -84,7 +84,8 @@ const server = http.createServer(async (req,res) => {
       const [group,id,...extra] = path.slice(5).split('/');
       if (path === '/api/dashboard') return json(res,200,currentSnapshot());
       if (!groups.includes(group) || extra.length) return json(res,404,{error:'未找到接口'});
-      const rows = currentSnapshot()[group];
+      const snapshot=currentSnapshot();
+      const rows = group==='trends' && id ? [...snapshot.trends,...(snapshot.archivedTrends??[])] : snapshot[group];
       const value = id ? rows.find(r => String(r.id ?? r.handle) === id || (group === 'posts' && (r.nativeArticleId === id || r.aliases?.includes(id)))) : rows;
       return value ? json(res,200,value) : json(res,404,{error:'未找到记录'});
     }

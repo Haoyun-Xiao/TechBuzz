@@ -63,8 +63,8 @@ test('四项评分、独立的 Idea / 多趋势、上午八点日报和历史追
   const log = [];
   const complete = fakeModel(log);
   const high = post('high', '18', {
-    text: '完整的观点。'.repeat(2_000),
-    quoted: { id: 'quoted', text: '作者所引原文' },
+    text: '完整的观点。'.repeat(5_000),
+    quoted: { id: 'quoted', text: '作者所引原文'.repeat(2_000) },
     thread: [{ id: 'future-thread', text: '随后修订', publishedAt: '2026-11-20T09:00:00+08:00' }],
   });
   const rows = [high, post('low', '18'), post('other', '18'), post('new', '20')];
@@ -98,6 +98,9 @@ test('四项评分、独立的 Idea / 多趋势、上午八点日报和历史追
   result = await analyze(db, rows, { now: eight, complete });
   assert.equal(result.reports.length, 1);
   assert.equal(result.reports[0].date, '2026-11-18');
+  const reportInput = log.find(({ kind }) => kind === 'report').input;
+  assert.equal(reportInput.posts.find(p => p.id === 'high').text, high.text);
+  assert.equal(reportInput.posts.find(p => p.id === 'high').quoted.text, high.quoted.text);
   assert.equal(result.reports[0].updatedAt, '2026-11-19T00:00:00.000Z');
   assert.equal(result.reports[0].asOf, result.reports[0].updatedAt);
   assert.notEqual(result.reports[0].generatedAt, result.reports[0].asOf);

@@ -31,6 +31,7 @@ x-research-runtime: &research-runtime
     TECHBUZZ_LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:-}
     TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
     TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
+    TECHBUZZ_WEB_SEARCH: ${TECHBUZZ_WEB_SEARCH:-true}
     TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
   volumes:
     - research-data:/research-data
@@ -39,6 +40,9 @@ x-research-runtime: &research-runtime
     - ./activity.mjs:/app/research/activity.mjs:ro
     - ./db.mjs:/app/research/db.mjs:ro
     - ./collector.mjs:/app/research/collector.mjs:ro
+    - ./research-prompts.mjs:/app/research/research-prompts.mjs:ro
+    - ./research-lifecycle.mjs:/app/research/research-lifecycle.mjs:ro
+    - ./research-web.mjs:/app/research/research-web.mjs:ro
     - ./research.mjs:/app/research/research.mjs:ro
     - ./worker.mjs:/app/research/worker.mjs:ro
     - ./bootstrap.mjs:/app/research/bootstrap.mjs:ro

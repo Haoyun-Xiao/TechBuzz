@@ -10,7 +10,7 @@ import { ScoreLabel } from "../../components/ui/Score";
 import { SourceAvatar } from "../../components/ui/SourceAvatar";
 import { FeedItem } from "../feed/FeedItem";
 import { DayHeader, TimelineSlot } from "../feed/Timeline";
-import { kindLabel, postLookup, postPath, postTitle, safeURL, stamp, type Activity, type Dashboard, type Media, type Post, type ReferencedPost } from "./data";
+import { kindLabel, postLookup, postPath, postTitle, safeURL, stamp, type Activity, type Dashboard, type Media, type Post, type ReferencedPost, type WebSource } from "./data";
 import { toggleSaved } from "./saved";
 
 export function Heading({ title, back }: { title: string; back?: BackTarget }) {
@@ -32,6 +32,15 @@ export function SaveButton({ entry, saved, data }: { entry: string; saved: strin
   >
     <IconBookmark size={18} filled={on} />
   </button>;
+}
+
+export function WebSources({ sources }: { sources?: WebSource[] }) {
+  if (!sources?.length) return null;
+  return <div className="mt-3 text-sm"><p className="font-medium text-ink-2">联网核验来源</p>
+    <ul className="mt-1 space-y-1">{sources.map(source => <li key={source.url}>
+      <External url={source.url}>{source.title}</External> <time className="text-ink-4">{source.date.slice(0, 10)}</time>
+    </li>)}</ul>
+  </div>;
 }
 
 export function External({ url, children }: { url?: string | null; children: ReactNode }) {

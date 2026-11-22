@@ -4,10 +4,15 @@ import { beijingDate } from "@techbuzz/contracts/time";
 import { EmptyState } from "../../components/ui/Page";
 import { ReportLayout } from "../report/ReportLayout";
 import { ReportPaper, reportOutline } from "../report/ReportPaper";
-import { postLookup, postPath, postTitle, reportDate, safeURL, stamp, type Dashboard, type Generation, type ResearchEntry } from "./data";
-import { Heading, SaveButton } from "./Posts";
+import { postLookup, postPath, postTitle, reportDate, safeURL, stamp, type Dashboard, type Generation, type ResearchEntry, type WebSource } from "./data";
+import { Heading, SaveButton, WebSources } from "./Posts";
 import { GenerationStatus } from "./ResearchViews";
 import { useSaved } from "./saved";
+
+export function dailyWebSources(entry?: ResearchEntry) {
+  const sources = entry?.sections?.flatMap(section => section.webSources ?? []) ?? [];
+  return [...new Map(sources.map(source => [source.url, source])).values()];
+}
 
 export function dailyIndex(reports: ResearchEntry[]): ReportNavigationEntry[] {
   const ordered = [...reports].sort((a, b) => reportDate(b).localeCompare(reportDate(a)));
@@ -61,7 +66,7 @@ export function dailyPage(data: Dashboard, index: ReportNavigationEntry[], entry
   };
 }
 
-export function ResearchDaily({ data, index, report, asOf, coverage, related = [] }: { data: Dashboard; index: ReportNavigationEntry[]; report: ReportDetail | null; asOf?: string; coverage?: ResearchEntry["coverage"]; related?: Array<{id:string;title:string}> }) {
+export function ResearchDaily({ data, index, report, asOf, coverage, webSources, related = [] }: { data: Dashboard; index: ReportNavigationEntry[]; report: ReportDetail | null; asOf?: string; coverage?: ResearchEntry["coverage"]; webSources?: WebSource[]; related?: Array<{id:string;title:string}> }) {
   const saved = useSaved(data);
   return <ReportLayout kind="daily" index={index} current={report?.key ?? null} today={beijingDate(data.generatedAt)} dailyOnly outline={report ? reportOutline(report, true) : []}>
     {(!report || data.generation.report?.date === report.key) && <GenerationStatus generation={data.generation.report} />}
@@ -73,6 +78,7 @@ export function ResearchDaily({ data, index, report, asOf, coverage, related = [
       </div>
       {coverage && <p className="mb-4 text-sm text-ink-3">历史复盘 · 材料可见截至 {stamp(coverage.cutoff)}。{coverage.laterCount ? `本期有 ${coverage.laterCount} 条原帖在原定生成时间后补录。` : "本期材料均在原定生成时间前收录。"}</p>}
       <ReportPaper report={report} index={index} itemPath={postPath} keepSummary />
+      <WebSources sources={webSources} />
       {related.length > 0 && <section className="mt-6"><h2 className="font-semibold">本期讨论的研究</h2><ul>{related.map(item => <li key={item.id}><Link className="text-accent" to={`/${item.id.startsWith("trend-") ? "trends" : "ideas"}/${item.id}`}>{item.title}</Link></li>)}</ul></section>}
     </> : <EmptyState title="还没有发布日报" />}
   </ReportLayout>;

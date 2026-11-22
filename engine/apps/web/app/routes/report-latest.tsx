@@ -14,7 +14,7 @@ import type { Screen } from "../components/shell/screens";
 
 import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
 import { project, reportDate } from "../features/research/data";
-import { dailyIndex, dailyPage, ResearchDaily } from "../features/research/ResearchDaily";
+import { dailyIndex, dailyPage, dailyWebSources, ResearchDaily } from "../features/research/ResearchDaily";
 
 export const handle: Screen = { tab: "daily", name: "日报" };
 export { pageHeaders as headers } from "../lib/api.server";
@@ -30,7 +30,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     const dashboard = await loadResearch(request);
     const index = dailyIndex(dashboard.reports);
     const entry = dashboard.reports.find((report) => reportDate(report) === index[0]?.key);
-    return researchPage({ research: { data: project(dashboard, {}), index, report: entry ? dailyPage(dashboard, index, entry) : null, asOf: entry?.asOf, coverage: entry?.coverage, related: [...dashboard.ideas, ...dashboard.trends].filter(item => [...(entry?.ideaIds ?? []), ...(entry?.trendIds ?? [])].includes(item.id)).map(item => ({id:item.id,title:item.title})) } });
+    return researchPage({ research: { data: project(dashboard, {}), index, report: entry ? dailyPage(dashboard, index, entry) : null, asOf: entry?.asOf, coverage: entry?.coverage, webSources: dailyWebSources(entry), related: [...dashboard.ideas, ...dashboard.trends].filter(item => [...(entry?.ideaIds ?? []), ...(entry?.trendIds ?? [])].includes(item.id)).map(item => ({id:item.id,title:item.title})) } });
   }
   const { index, report } = await loadOr404<ReportLatestPage>(`/api/site/reports/${kind}/latest-page`, { signal: request.signal });
   return cachedPage(600, { kind, report, index, today: beijingDate(Date.now()) });

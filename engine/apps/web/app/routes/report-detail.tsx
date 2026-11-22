@@ -13,7 +13,7 @@ import type { Screen } from "../components/shell/screens";
 
 import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
 import { project, reportDate } from "../features/research/data";
-import { dailyIndex, dailyPage, ResearchDaily } from "../features/research/ResearchDaily";
+import { dailyIndex, dailyPage, dailyWebSources, ResearchDaily } from "../features/research/ResearchDaily";
 
 export const handle: Screen = { tab: "daily", name: "日报" };
 export { pageHeaders as headers } from "../lib/api.server";
@@ -36,7 +36,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const index = dailyIndex(dashboard.reports);
     const entry = dashboard.reports.find((report) => reportDate(report) === key);
     if (!entry) throw data({ message: "not_found" }, { status: 404 });
-    return researchPage({ research: { data: project(dashboard, {}), index, report: dailyPage(dashboard, index, entry), asOf: entry.asOf, coverage: entry.coverage, related: [...dashboard.ideas, ...dashboard.trends].filter(item => [...(entry.ideaIds ?? []), ...(entry.trendIds ?? [])].includes(item.id)).map(item => ({id:item.id,title:item.title})) } });
+    return researchPage({ research: { data: project(dashboard, {}), index, report: dailyPage(dashboard, index, entry), asOf: entry.asOf, coverage: entry.coverage, webSources: dailyWebSources(entry), related: [...dashboard.ideas, ...dashboard.trends].filter(item => [...(entry.ideaIds ?? []), ...(entry.trendIds ?? [])].includes(item.id)).map(item => ({id:item.id,title:item.title})) } });
   }
   if (!PATTERN[kind].test(key)) throw data({ message: "not_found" }, { status: 404 });
   const [report, { items: index }] = await Promise.all([

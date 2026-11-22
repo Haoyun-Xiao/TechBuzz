@@ -4,7 +4,7 @@ import { Badge } from "../../components/ui/Badge";
 import { EmptyState } from "../../components/ui/Page";
 import { PillTabs } from "../../components/ui/Tabs";
 import { IconChevronRight } from "../../components/icons";
-import { Evidence, External, Heading, SaveButton } from "./Posts";
+import { Evidence, External, Heading, SaveButton, WebSources } from "./Posts";
 import { postLookup, reportPath, stamp, topicPath, type Dashboard, type Generation, type HotEntry, type ResearchEntry, type Topic } from "./data";
 import { useSaved } from "./saved";
 
@@ -61,30 +61,42 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   </section>;
 }
 
-const fields = [
-  ["投资假设", "thesis"], ["已知事实", "facts"], ["作者观点", "authorView"], ["研究推断", "inference"],
-  ["趋势阶段", "stage"], ["催化剂", "catalyst"], ["风险", "risk"], ["失效条件", "invalidation"], ["下一步核对", "watchNext"],
-] as const;
+function prose(...values: unknown[]) {
+  return values.flatMap(value => Array.isArray(value) ? value : [value]).filter(value => typeof value === "string" && value.trim()).join("\n\n");
+}
 
-const revisionFields = [
-  ["此前判断", "previousJudgment"], ["新证据", "newEvidence"], ["本次影响", "change"],
-  ["仍待核实", "remaining"], ["下一次核验", "watchNext"],
-] as const;
+function Paragraph({ children }: { children: string }) {
+  return <p className="whitespace-pre-line text-[15px] leading-8 text-ink-2">{children}</p>;
+}
 
-function JudgmentChange({ item, data }: { item: ResearchEntry; data: Dashboard }) {
-  return <section className="card mt-4 px-4 py-4">
-    <div className="mb-2 flex flex-wrap items-center gap-3">
-      <h2 className="text-[17px] font-semibold text-ink">本次判断变化</h2>
-      {item.maturity && <Badge tone="accent">{item.maturity}</Badge>}
-      {item.stage && <Badge>{item.stage}</Badge>}
-    </div>
-    <dl className="divide-y divide-line-soft">
-      {revisionFields.map(([label,key]) => item[key] && <div key={key} className="py-2.5 text-sm leading-relaxed">
-        <dt className="font-semibold text-ink">{label}</dt><dd className="mt-1 text-ink-2">{item[key]}</dd>
-        {key === "newEvidence" && !!item.changeEvidence?.length && <dd><Evidence ids={item.changeEvidence} data={data} /></dd>}
+function ResearchBody({ item, type, data }: { item: ResearchEntry; type: "ideas" | "trends"; data: Dashboard }) {
+  const sourceLinks = <details className="mt-4 text-sm"><summary className="cursor-pointer text-accent">查看原帖与联网来源</summary>
+    <Evidence ids={item.evidence} data={data} />
+    {!!item.counterEvidence?.length && <Evidence ids={item.counterEvidence} data={data} />}
+    <WebSources sources={item.webSources} />
+  </details>;
+  if (type === "ideas") {
+    const blocks = [
+      ["核心逻辑与标的", item.coreIdea || prose(item.thesis, item.change)],
+      ["事实与分歧", item.evidenceBase || prose(item.facts, item.authorView, item.newEvidence)],
+      ["产业背景推演", item.industryContext || prose(item.inference, item.remaining)],
+      ["催化与核查", item.actionAndWatch || prose(item.catalyst, item.risk, item.invalidation, item.watchNext)],
+    ];
+    return <>{blocks.map(([title, text]) => text ? <Section key={title} title={title}><Paragraph>{text}</Paragraph>
+      {title === "事实与分歧" && sourceLinks}</Section> : null)}</>;
+  }
+  return <>
+    <Section title="趋势判断与投资关联"><Paragraph>{item.trendOverview || prose(item.summary, item.change)}</Paragraph></Section>
+    <Section title="关键事件时间线">
+      {(item.timeline ?? []).map((node, index) => <div key={index} className="relative ml-2 border-l-2 border-accent/30 pb-6 pl-5">
+        <span className="absolute -left-[5px] top-1 size-2 rounded-full bg-accent" />
+        <time className="text-sm font-semibold text-accent">{node.date}</time>
+        <Paragraph>{node.summary ?? ""}</Paragraph>
+        {!!node.evidence?.length && <details className="mt-1 text-sm"><summary className="cursor-pointer text-ink-4">查看当日依据</summary><Evidence ids={node.evidence} data={data} /></details>}
       </div>)}
-    </dl>
-  </section>;
+    </Section>
+    <Section title="核心证据与待验假设"><Paragraph>{item.evidenceAndHypotheses || prose(item.newEvidence,item.remaining,item.watchNext)}</Paragraph>{sourceLinks}</Section>
+  </>;
 }
 
 export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"; data: Dashboard; item?: ResearchEntry }) {
@@ -101,36 +113,17 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
         <span>本条生成 {stamp(item.generatedAt || item.updatedAt)}</span>
         <span className="ml-auto"><SaveButton entry={`${type}/${item.id}`} data={data} saved={saved} /></span>
       </div>
-      {item.change ? <JudgmentChange item={item} data={data} /> : item.summary && <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{item.summary}</p>}
-      {fields.some(([, key]) => item[key]?.length) && <Section title="研究要点">
-        <dl className="grid gap-3 text-[14px] leading-relaxed text-ink-2">
-          {fields.map(([label, key]) => {
-            const value = item[key];
-            return value?.length && !(item.change && key === "watchNext") ? <div key={key}>
-              <dt className="font-semibold text-ink">{label}</dt>
-              <dd className="mt-1">{Array.isArray(value) ? value.join("、") : value}</dd>
-            </div> : null;
-          })}
-        </dl>
-      </Section>}
-      <Section title="支持证据"><Evidence ids={item.evidence} data={data} /></Section>
-      {!!item.counterEvidence?.length && <Section title="反证"><Evidence ids={item.counterEvidence} data={data} /></Section>}
-      {item.timeline?.length ? <Section title="趋势演进">
-        {[...item.timeline].reverse().map((entry, i) => <div key={i} className="border-b border-line-soft py-3">
-          <p className="text-xs text-ink-4">{stamp(entry.date || entry.updatedAt)}</p>
-          <p className="mt-2 text-sm text-ink-2">{entry.summary}</p>
-          {!!entry.evidence?.length && <Evidence ids={entry.evidence} data={data} />}
-          {!!entry.counterEvidence?.length && <><span className="text-xs text-ink-4">反向依据</span><Evidence ids={entry.counterEvidence} data={data} /></>}
-        </div>)}
-      </Section> : null}
-      {item.history?.length ? <Section title="研究修订">
+      {item.status === "archived" && <p className="mt-3 text-sm text-ink-4">此趋势已移出当前跟踪，以下为历史判断。</p>}
+      {item.maturity && <div className="mt-3"><Badge tone="accent">{item.maturity}</Badge></div>}
+      {type === "ideas" && item.summary && <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{item.summary}</p>}
+      <ResearchBody item={item} type={type} data={data} />
+      {item.history?.length ? <details className="mt-6 border-t border-line pt-4">
+        <summary className="cursor-pointer font-medium">历史修订（{item.history.length}）</summary>
         {[...item.history].reverse().map((entry, i) => <div key={i} className="border-b border-line-soft py-3">
           <p className="text-xs text-ink-4">{stamp(entry.generatedAt || entry.date || entry.updatedAt)}</p>
-          <p className="mt-2 text-sm text-ink-2">{entry.summary}</p>
-          {!!entry.evidence?.length && <Evidence ids={entry.evidence} data={data} />}
-          {!!entry.counterEvidence?.length && <Evidence ids={entry.counterEvidence} data={data} />}
+          <p className="mt-2 text-sm leading-relaxed text-ink-2">{entry.summary}</p>
         </div>)}
-      </Section> : null}
+      </details> : null}
       {item.relatedIds?.length ? <Section title="相关研究">
         <div className="space-y-2">{(["ideas", "trends"] as const).flatMap((group) => data[group]
           .filter((entry) => entry.id !== item.id && item.relatedIds?.includes(entry.id))

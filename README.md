@@ -12,6 +12,8 @@ docker compose up --build -d
 
 新环境先将 `.env.example` 复制为 `.env`。为 PostgreSQL 密码、会话签名、图片签名、引擎后台密码和研究后台令牌各生成一个独立随机值（例如分别执行 `openssl rand -hex 32`）。配置 `TECHBUZZ_LLM_BASE_URL`、`TECHBUZZ_LLM_API_KEY`、`TECHBUZZ_LLM_MODEL` 和推理强度。默认以 `TECHBUZZ_X_PROVIDER=free` 从公开时间线采集，无需浏览器或采集密钥。如需切回原付费接口，设置 `TECHBUZZ_X_PROVIDER=socialdata` 和 `TECHBUZZ_SOCIALDATA_API_KEY`，再运行 `docker compose up -d`。密钥只放在本机。
 
+Idea、趋势最终合成和日报默认向模型提供 `web_search`。DeepSeek 通过 OpenCode Go 提出查询，研究 worker 用 Exa 的公开 MCP 检索带发布日期的网页片段。只有本次实际检索到且被条目引用的网页才列入「联网核验来源」。检索无结果时模型可沿用原帖并注明待核。设置 `TECHBUZZ_WEB_SEARCH=false` 并运行 `docker compose up -d --no-deps research-worker` 可关闭。
+
 打开 [首页](http://127.0.0.1:19282/)、[全部动态](http://127.0.0.1:19282/all)、[引擎管理](http://127.0.0.1:19282/admin) 或 [Agent 接入](http://127.0.0.1:19282/agent)。仅 web 在本机回环地址发布端口。运行 `docker compose down` 可停止此部署并保留数据卷。
 
 ## 数据来源与研究流程
@@ -40,6 +42,12 @@ node --env-file=.env replay-trend.mjs /path/to/review.sqlite <trend-id> <as-of-I
 ```
 
 历史日报可通过 `--focus <原帖ID>` 为单期指定需要核验的串帖。定时任务自行选题。趋势定向回放只更新指定趋势，两个帖子参数使用逗号分隔的原帖 ID。部署时可用 `TECHBUZZ_RESEARCH_VOLUME`、`TECHBUZZ_WEB_IMAGE`、`TECHBUZZ_RESEARCH_IMAGE` 和 `TECHBUZZ_RESEARCH_WORKER_IMAGE` 选择同一版研究库与镜像。
+
+## 研究提示词与生命周期
+
+三套生成提示词集中在 `research-prompts.mjs`，采用 Gemini V2 的四块 Idea、三块趋势与充实日报结构。Idea 可以围绕行业或产业链的同一个投资问题更新，保存 `coreIdea/evidenceBase/industryContext/actionAndWatch`；趋势保存 `trendOverview/timeline/evidenceAndHypotheses`。旧记录仍可阅读。
+
+趋势依据最近新增信息日期执行 30 天清理，移出当前列表并保留历史链接。模型可用 `mergePriors` 把相近趋势并入指定 `prior`，合并证据及时间线，旧 ID 指向保留的主条目。旧内容重新生成不会延长活跃期。读者打开页面只读取结果。
 
 ## 本地快照
 

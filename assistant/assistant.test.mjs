@@ -59,3 +59,9 @@ test('follow-up reloads cited post bodies and dated historical web excerpts inst
  await runTurn({store,session:s,messageId:id,question:'Which part is weakest?',snapshot,signal:signal(),emit:()=>{},model:async({messages})=>{assert(messages.some(m=>m.content?.includes('Oracle financing')));assert(messages.some(m=>m.content?.includes('the original source passage')&&m.content.includes('revalidatedThisTurn')));return {message:{role:'assistant',content:'重新读取原帖 [P-1]，并参考此前网页片段 [W-test]。'}};}});
  const a=store.get(s).messages.at(-1);assert.equal(a.status,'complete');assert.equal(a.sources.length,2);assert(!a.text.includes('未核验'));assert.equal(a.sources.find(s=>s.kind==='web').cached,true);store.db.close();
 });
+
+test('archived trends can be read by ID without polluting the active trend list',async()=>{
+ const t=makeTools({...snapshot,archivedTrends:[{id:'archived-trend',title:'previous hypothesis',timeline:[{date:'2026-11-01',summary:'earlier evidence'}]}]},{signal:signal()});
+ assert.equal((await t.call('read_research',{section:'trends'})).total,0);
+ const result=await t.call('read_research',{section:'trends',id:'archived-trend'});assert.equal(result.items[0].timeline[0].summary,'earlier evidence');
+});

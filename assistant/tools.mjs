@@ -77,7 +77,7 @@ export function makeTools(snapshot,{signal,search=webSearch,now=Date.now(),histo
   }
   function readResearch(a){
     if(!['ideas','trends','reports'].includes(a.section))throw new Error('无效研究类型');
-    let rows=snapshot[a.section]??[]; if(a.id)rows=rows.filter(r=>r.id===a.id||r.date===a.id);
+    let rows=[...(snapshot[a.section]??[]),...(a.section==='trends'&&a.id?snapshot.archivedTrends??[]:[])]; if(a.id)rows=rows.filter(r=>r.id===a.id||r.date===a.id);
     if(a.q){const terms=normalize(a.q).split(/\s+/);rows=rows.filter(r=>terms.some(t=>normalize(JSON.stringify(r)).includes(t)));}
     const offset=a.offset??0;const page=rows.slice(offset,offset+(a.id?1:8));
     return {historicalModelJudgment:true,total:rows.length,nextOffset:offset+page.length<rows.length?offset+page.length:null,items:page.map(r=>({...(!a.id?{id:r.id,title:r.title,summary:r.summary,companies:r.companies,topics:r.topics,evidence:r.evidence,asOf:r.asOf,status:r.status,detailAvailable:true}:r),reference:addRef({key:'R-'+r.id,id:r.id,kind:a.section,title:r.title,date:r.asOf??r.date,href:a.section==='reports'?'/daily/'+(r.date||r.id.replace('report-','')):`/${a.section}/${r.id}`})}))};

@@ -1,7 +1,7 @@
 # TechBuzz 研究助手
 
 独立 Node 服务，读取 TechBuzz HTTP 数据，复用现有 OpenCode Go / DeepSeek 配置。
-基线：`4403324d83e76d559b7f24d73c123bd4e10d0e53`；开发分支 `codex/techbuzz-assistant`。
+基线：`4403324d83e76d559b7f24d73c123bd4e10d0e53`；开发分支 `codex/techbuzz-assistant`，交付前已对齐主对话提交 `2f1961c`。
 
 ## 启动预览
 

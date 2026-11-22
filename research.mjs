@@ -374,7 +374,7 @@ function modelClient(db, options) {
       const endpoint = new URL(base.replace(/\/+$/, '').replace(/(?:\/chat\/completions)?$/, '/chat/completions'));
       const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` };
       if (endpoint.hostname === 'opencode.ai') headers['x-opencode-session'] = `ses_${session}-${kind.startsWith('trend') ? 'trends' : kind}`;
-      const budgets = kind === 'trends' ? [49_152, 65_536] : [16_384, 32_768];
+      const budgets = kind === 'trends' ? [49_152, 65_536] : kind === 'ideas' ? [32_768, 49_152] : [16_384, 32_768];
       let retryCount = 0;
       for (let budget = 0; budget < budgets.length;) {
         const maxTokens = budgets[budget];

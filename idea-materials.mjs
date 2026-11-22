@@ -32,3 +32,23 @@ export function ideaMaterials(triggers, rows, now, normalize) {
   return [...new Map(selected.map(r=>[r.material.id,r])).values()]
     .sort((a,b)=>a.publishedMs-b.publishedMs||a.material.id.localeCompare(b.material.id));
 }
+
+
+// Related questions share a lane, so later batches see earlier saved judgments.
+export function ideaLanes(rows, normalize, related = () => []) {
+  const lanes=[];
+  for(const row of rows){
+    const targets=new Set(related(row));
+    const matches=lanes.filter(lane=>lane.rows.some(r=>relevance(row,r,normalize)>=4)
+      || [...targets].some(id=>lane.targets.has(id)));
+    const lane={rows:[row],targets};
+    for(const previous of matches){
+      lane.rows.push(...previous.rows);
+      for(const id of previous.targets)lane.targets.add(id);
+      lanes.splice(lanes.indexOf(previous),1);
+    }
+    lane.rows.sort((a,b)=>a.publishedMs-b.publishedMs||a.material.id.localeCompare(b.material.id));
+    lanes.push(lane);
+  }
+  return lanes.map(lane=>lane.rows);
+}

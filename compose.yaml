@@ -32,6 +32,7 @@ x-research-runtime: &research-runtime
     TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
     TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
     TECHBUZZ_IDEAS_ENABLED: ${TECHBUZZ_IDEAS_ENABLED:-true}
+    TECHBUZZ_RESEARCH_CONCURRENCY: ${TECHBUZZ_RESEARCH_CONCURRENCY:-12}
     TECHBUZZ_WEB_SEARCH: ${TECHBUZZ_WEB_SEARCH:-true}
     TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
   volumes:
@@ -43,6 +44,7 @@ x-research-runtime: &research-runtime
     - ./collector.mjs:/app/research/collector.mjs:ro
     - ./idea-materials.mjs:/app/research/idea-materials.mjs:ro
     - ./research-prompts.mjs:/app/research/research-prompts.mjs:ro
+    - ./research-parallel.mjs:/app/research/research-parallel.mjs:ro
     - ./research-lifecycle.mjs:/app/research/research-lifecycle.mjs:ro
     - ./research-web.mjs:/app/research/research-web.mjs:ro
     - ./research.mjs:/app/research/research.mjs:ro

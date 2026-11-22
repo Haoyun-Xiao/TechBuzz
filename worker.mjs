@@ -3,7 +3,7 @@ import { openDatabase } from './db.mjs';
 import { closeDb, sql } from '@techbuzz/backend/db';
 import { ENTITIES, ENTITY_TAGS, TOPIC_TAGS } from '@techbuzz/industry/taxonomy';
 import { syncResearch } from './bridge.mjs';
-import { runResearchModule, enrichMaterials } from './research.mjs';
+import { runResearchModule, runTrendModules, enrichMaterials } from './research.mjs';
 
 const db = openDatabase();
 const controller = new AbortController();
@@ -21,19 +21,27 @@ let latestPosts;
 async function refreshSources() {
   latestPosts = await syncResearch(db, sql, { entities:ENTITIES,companyTags:ENTITY_TAGS,topicTags:TOPIC_TAGS });
 }
-async function runResearch(kind) {
+async function runResearch(kind, posts = latestPosts) {
   if (kind === 'ideas' && process.env.TECHBUZZ_IDEAS_ENABLED === 'false') {
     db.prepare("UPDATE research_jobs SET status='disabled', error=NULL WHERE kind='ideas' AND scope='current' AND status!='disabled'").run();
   }
-  if (!latestPosts) return;
+  if (!posts) return;
   if (!process.env.TECHBUZZ_LLM_API_KEY || !process.env.TECHBUZZ_LLM_MODEL) return;
-  await runResearchModule(db, latestPosts, kind);
+  await runResearchModule(db, posts, kind);
 }
 async function runEnrichment() {
   if (latestPosts && process.env.TECHBUZZ_LLM_API_KEY && process.env.TECHBUZZ_LLM_MODEL) await enrichMaterials(db, latestPosts);
 }
+async function researchCycle() {
+  const posts=latestPosts;
+  if(!posts)return;
+  await runResearch('ideas',posts);
+  const ideaJob=db.prepare("SELECT status FROM research_jobs WHERE kind='ideas' AND scope='current'").get();
+  if(!['completed','disabled'].includes(ideaJob?.status))return;
+  await runTrendModules(db,posts);
+}
 try {
-  await Promise.all([loop(refreshSources, 60), ...['report', 'trends', 'idea_trends', 'ideas'].map(kind => loop(() => runResearch(kind), 60)), loop(runEnrichment, 60)]);
+  await Promise.all([loop(refreshSources,60),loop(researchCycle,60),loop(()=>runResearch('report'),60),loop(runEnrichment,60)]);
 } finally {
   db.close();
   await closeDb();

@@ -35,3 +35,12 @@ test('V3 persists the four fields while a high-score context cannot replace a tr
  assert.deepEqual(observed.triggerIds,['trigger']);
  db.close();
 });
+
+test('independent idea lanes may run in parallel but shared hypotheses remain ordered',async()=>{
+ const {ideaLanes}=await import('./idea-materials.mjs');
+ const a=row('a','2026-11-20',['融资'],'融资现金流');
+ const b=row('b','2026-11-21',['光刻'],'设备认证');
+ const c=row('c','2026-11-22',['融资'],'贷款交付');
+ assert.deepEqual(ideaLanes([a,b,c],normalize).map(g=>g.map(r=>r.material.id)).sort(),[['a','c'],['b']]);
+ assert.equal(ideaLanes([a,b,c],normalize,()=>['same-idea']).length,1);
+});

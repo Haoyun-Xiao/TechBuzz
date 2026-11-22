@@ -1,5 +1,6 @@
 import { DatabaseSync } from 'node:sqlite';
-import { ideaGroups, ideaMaterials } from './idea-materials.mjs';
+import { parallelMap, researchConcurrency } from './research-parallel.mjs';
+import { ideaLanes, ideaMaterials } from './idea-materials.mjs';
 import { researchWebChat } from './research-web.mjs';
 import { ideaPrompt, trendPrompt, reportPrompt } from './research-prompts.mjs';
 import { expiredTrends, mergeTrendUpdates, latestSignal } from './research-lifecycle.mjs';
@@ -518,7 +519,7 @@ async function scorePosts(db, client, posts, now, readOnly = false) {
     const pending = units.filter(({ material }) => cached.get(material.id) !== contentHashes.get(material.id));
     const write = db.prepare(`INSERT INTO research_scores VALUES (?, ?, ?)
       ON CONFLICT(post_id) DO UPDATE SET input_hash = excluded.input_hash, value = excluded.value`);
-    for (const group of batches(pending)) {
+    await parallelMap(batches(pending),researchConcurrency(),async group=>{
       const result = await ask(client, 'score', { posts: group.map(({ material }) => material) });
       const rows = objectArray(result, 'scores');
       const scoreById = new Map(rows.map((row) => [String(row.id), row]));
@@ -542,7 +543,7 @@ async function scorePosts(db, client, posts, now, readOnly = false) {
         })];
       });
       transaction(db, () => validated.forEach((row) => write.run(...row)));
-    }
+    });
     const alias = db.prepare('INSERT INTO research_score_aliases VALUES (?, ?) ON CONFLICT(post_id) DO UPDATE SET root_id = excluded.root_id');
     const clear = db.prepare('DELETE FROM research_score_aliases WHERE post_id = ?');
     return () => {
@@ -850,14 +851,17 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
         writeReceipt.run(receiptHash,JSON.stringify({ ...receipt, ...provenance, status:'completed', published }));
       });
     };
-    const groups = ideaGroups(pending,ideaLabels).flatMap(group=>batches(group,options.replay && !target ? 5 : 4));
-    const parallel = options.replay && !target ? 6 : 1;
-    for (let index = 0; index < groups.length; index += parallel) {
-      const prepared = await Promise.allSettled(groups.slice(index,index+parallel).map(processBatch));
-      for (const result of prepared) if (result.status === 'fulfilled') result.value();
-      const failed = prepared.find(result => result.status === 'rejected');
-      if (failed) throw failed.reason;
-    }
+    const lanes=ideaLanes(pending,ideaLabels,row=>existing
+      .filter(entry=>entry.status==='active' && ideaMatch(row,entry,true)>=2).map(entry=>entry.id));
+    console.info('TechBuzz ideas', 'pending='+pending.length,'lanes='+lanes.length);
+    let completed=0;
+    await parallelMap(lanes,Math.min(6,researchConcurrency()),async lane=>{
+      for(const group of batches(lane,4)){
+        (await processBatch(group))();
+        completed+=group.length;
+        console.info('TechBuzz ideas','completed='+completed+'/'+pending.length);
+      }
+    });
     return () => {
       if (target) return;
       const high = new Set(posts.filter(row => row.assessment?.score >= threshold).map(row => row.material.id));
@@ -905,16 +909,17 @@ async function reduceTrends(client, signals, datedSources, get, put) {
   let level = signals;
   // The reducer contracts each pack of up to 36 observations to at most 12.
   while (level.length > 36 || size({ analysis: level, sources: sourcesFor(level) }) > TREND_CONTEXT_LIMIT) {
-    const next = [];
-    for (const group of packs(level, TREND_CONTEXT_LIMIT, (item) => size(item) + size(sourcesFor([item])), 36)) {
+    const groups=packs(level,TREND_CONTEXT_LIMIT,item=>size(item)+size(sourcesFor([item])),36);
+    console.info('TechBuzz trend reduction','groups='+groups.length,'concurrency='+researchConcurrency());
+    const next = (await parallelMap(groups,researchConcurrency(),async group=>{
       const input = { signals: group, sources: sourcesFor(group) };
       const key = hash(['reduce', TREND_BATCH_VERSION, client.signature, input]);
       const cached = get.get(key);
       const compact = cached ? JSON.parse(cached.value)
         : trendSignals(await ask(client, 'trend_reduce', input), referenced(group), true).slice(0, Math.max(1, Math.floor(group.length / 3)));
       if (!cached) put.run(key, JSON.stringify(compact));
-      next.push(...compact);
-    }
+      return compact;
+    })).flat();
     level = next;
   }
   return { analysis: level, sources: sourcesFor(level) };
@@ -1069,7 +1074,37 @@ function activeInWindow(posts, start, end) {
   }).sort((a,b)=>a.publishedMs-b.publishedMs || a.material.id.localeCompare(b.material.id));
 }
 
-async function makeTrends(db, client, posts, now, trackingMode = 'regular') {
+async function prepareTrendAnalysis(db, client, recent) {
+    const get = db.prepare('SELECT value FROM research_trend_batches WHERE input_hash = ?');
+    const put = db.prepare('INSERT OR REPLACE INTO research_trend_batches VALUES (?, ?)');
+    const dailyPosts=Map.groupBy(recent,({publishedMs})=>beijingDate(publishedMs));
+    const groups=[...dailyPosts].flatMap(([date,rows])=>batches(rows).map(group=>({date,group})));
+    let completed=0;
+    console.info('TechBuzz trend extraction','batches='+groups.length,'concurrency='+researchConcurrency());
+    const analysis=(await parallelMap(groups,researchConcurrency(),async ({date,group})=>{
+      const groupDigest=hash([TREND_BATCH_VERSION,client.signature,group.map(row=>row.scoreHash)]);
+      const cached=get.get(groupDigest);
+      if(cached){completed++;return JSON.parse(cached.value)}
+      const posts=group.map(({material,assessment,scoreThrough,scoredAs,hasThread})=>({...material,
+        assessment:hasThread&&beijingDate(scoreThrough)>date?{score:assessment.score,scoredAs}:assessment}));
+      const result=await ask(client,'trend_batch',{date,posts});
+      const signals=trendSignals(result,new Set(group.map(row=>row.material.id)));
+      put.run(groupDigest,JSON.stringify(signals));
+      console.info('TechBuzz trend extraction','completed='+ ++completed+'/'+groups.length);
+      return signals;
+    })).flat();
+    const datedSources = recent.map(({ material, assessment,publishedMs }) => ({
+      id: material.id, date: beijingDate(publishedMs), handle: material.handle,
+      evidenceKey: material.evidenceKey, score: assessment.score,
+    }));
+    const notes = new Map(recent.map(({ material, assessment, hasThread }) => [material.id,
+      hasThread ? clean(material.text || material.article?.text, 300) : assessment.summary,
+    ]));
+    const reduced = await reduceTrends(client, analysis, datedSources, get, put);
+  return {...reduced,notes};
+}
+
+async function makeTrends(db, client, posts, now, trackingMode = 'regular', getPrepared) {
   const scope = trackingMode === 'idea' ? 'ideas' : 'current';
   transaction(db, () => {
     for(const entry of expiredTrends(readEntries(db,'trends'),now))
@@ -1086,40 +1121,8 @@ async function makeTrends(db, client, posts, now, trackingMode = 'regular') {
   const fingerprint = hash([TREND_SYNTHESIS_VERSION, TREND_BATCH_VERSION, ...inputs, trackingMode, trackingMode==='idea' ? readEntries(db,'ideas').map(e=>[e.id,e.updatedAt,e.status]) : null]);
   const allowed = new Set(recent.map(({ material }) => material.id));
   await runJob(db, 'trends', scope, fingerprint, now, async () => {
-    const get = db.prepare('SELECT value FROM research_trend_batches WHERE input_hash = ?');
-    const put = db.prepare('INSERT OR REPLACE INTO research_trend_batches VALUES (?, ?)');
-    const analysis = [];
-    // Day-based batches keep earlier completed work reusable when a new day of posts arrives.
-    const dailyPosts = Map.groupBy(recent, ({ publishedMs }) => beijingDate(publishedMs));
-    for (const [date, dayPosts] of dailyPosts) {
-      for (const group of batches(dayPosts)) {
-        const groupDigest = hash([TREND_BATCH_VERSION, client.signature, group.map(({ scoreHash }) => scoreHash)]);
-        const cached = get.get(groupDigest);
-        if (cached) {
-          analysis.push(...JSON.parse(cached.value));
-          continue;
-        }
-        const posts = group.map(({ material, assessment, scoreThrough, scoredAs, hasThread }) => ({
-          ...material,
-          assessment: hasThread && beijingDate(scoreThrough) > date
-            ? { score: assessment.score, scoredAs }
-            : assessment,
-        }));
-        const result = await ask(client, 'trend_batch', { date, posts });
-        const groupIds = new Set(group.map(({ material }) => material.id));
-        const signals = trendSignals(result, groupIds);
-        put.run(groupDigest, JSON.stringify(signals));
-        analysis.push(...signals);
-      }
-    }
-    const datedSources = recent.map(({ material, assessment,publishedMs }) => ({
-      id: material.id, date: beijingDate(publishedMs), handle: material.handle,
-      evidenceKey: material.evidenceKey, score: assessment.score,
-    }));
-    const notes = new Map(recent.map(({ material, assessment, hasThread }) => [material.id,
-      hasThread ? clean(material.text || material.article?.text, 300) : assessment.summary,
-    ]));
-    const reduced = await reduceTrends(client, analysis, datedSources, get, put);
+    const prepared=await (getPrepared ? getPrepared() : prepareTrendAnalysis(db,client,recent));
+    const {notes,...reduced}=prepared;
     const updates = await publishTrendSynthesis(db, client, { windowStart, windowEnd, ...reduced }, notes, now, undefined, trackingMode);
     return () => {
       for (const entry of readEntries(db, 'trends')) {
@@ -1345,6 +1348,30 @@ export async function replayReport(db, posts, date, { focusPostId = null } = {})
   const coverage = { cutoff: iso(cutoff), scheduledAt: iso(scheduledAt), laterCount: dayPosts.filter(post => Date.parse(post.collectedAt) > scheduledAt).length };
   await makeReport(db, modelClient(db, {}), scored.rows, now, { allowPendingScores: true, coverage, replay: true, focusPostId });
   return research(db);
+}
+
+export async function refreshIdeas(db, posts, now = Date.now()) {
+  const client=modelClient(db,{});
+  const scored=await scorePosts(db,client,knownPosts(posts,now),now);
+  if(!scored.complete)throw new Error('本轮评分未完成');
+  const start=dayStart(beijingDate(now))-29*DAY;
+  const recentRoots=new Set(activeInWindow(scored.rows,start,now+1).map(row=>row.scoredAs||row.material.id));
+  const ok=await makeIdeas(db,client,scored.units,scored.rootIds,now,settings(db),{ids:recentRoots});
+  if(!ok)throw new Error(db.prepare("SELECT error FROM research_jobs WHERE kind='ideas' AND scope='current'").get()?.error||'Idea生成未完成');
+}
+
+export async function runTrendModules(db, posts, now = Date.now()) {
+  const client=modelClient(db,{});
+  const scored=await scorePosts(db,client,knownPosts(posts,now),now,true);
+  const end=beijingDate(now),start=dayStart(end)-29*DAY;
+  const recent=activeInWindow(scored.rows,start,now+1);
+  if(recent.some(row=>!row.assessment))throw new Error('趋势等待本轮评分完成');
+  let prepared;
+  const prepare=()=>prepared??=prepareTrendAnalysis(db,client,recent);
+  await Promise.all([
+    makeTrends(db,client,scored.rows,now,'regular',prepare),
+    makeTrends(db,client,scored.rows,now,'idea',prepare),
+  ]);
 }
 
 export async function runResearchModule(db, posts, kind) {

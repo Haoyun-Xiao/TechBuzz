@@ -51,7 +51,7 @@ test('低分反证只用于相关的既有 Idea，并保留历史支持和直接
   ];
   const after = await analyze(db, posts, { now: '2026-11-18T05:00:00Z', complete });
   assert.equal(after.ideas.length, 1);
-  assert.deepEqual(calls[1].posts.map(({ id, allowNewIdea }) => [id, allowNewIdea]), [['statement', false]]);
+  assert.deepEqual(calls[1].posts.filter(p=>p.role==='trigger').map(({ id, allowNewIdea }) => [id, allowNewIdea]), [['statement', false]]);
   assert.equal(calls[1].known[0].judgment, '交付依赖未落实的融资');
   assert.equal(calls[1].known[0].priorEvidence[0].author, 'source');
   assert.equal(after.ideas[0].id, before.ideas[0].id);

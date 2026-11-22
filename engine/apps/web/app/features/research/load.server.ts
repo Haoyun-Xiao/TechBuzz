@@ -29,8 +29,8 @@ export function entryEvidence(entry: ResearchEntry) {
 }
 
 export function entryCards(entries: ResearchEntry[]) {
-  return entries.map(({ id, title, summary, date, asOf, updatedAt, generatedAt, evidence, maturity, change, status, sourceIdeaId, stage }) => ({
-    id, title, summary, date, asOf, updatedAt, generatedAt, evidence, maturity, change, status, sourceIdeaId, stage,
+  return entries.map(({ id, title, summary, date, asOf, updatedAt, generatedAt, evidence, maturity, change, status, sourceIdeaId, stage, stance, horizon }) => ({
+    id, title, summary, date, asOf, updatedAt, generatedAt, evidence, maturity, change, status, sourceIdeaId, stage, stance, horizon,
   }));
 }
 

@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { ideaGroups, ideaMaterials } from './idea-materials.mjs';
 import { researchWebChat } from './research-web.mjs';
 import { ideaPrompt, trendPrompt, reportPrompt } from './research-prompts.mjs';
 import { expiredTrends, mergeTrendUpdates, latestSignal } from './research-lifecycle.mjs';
@@ -429,7 +430,7 @@ function mapCitations(value, translate) {
   if (Array.isArray(value)) return value.map((item) => mapCitations(item, translate));
   if (!value || typeof value !== 'object') return value;
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key,
-    ['evidence', 'counterEvidence'].includes(key) && Array.isArray(item)
+    ['evidence', 'counterEvidence', 'triggerIds'].includes(key) && Array.isArray(item)
       ? item.map(translate) : mapCitations(item, translate),
   ]));
 }
@@ -659,7 +660,7 @@ function ideaMatch(row, entry, precise = false) {
     .filter(name => companies.has(name))).size;
   const topics = new Set(ideaLabels([...(assessment.topics ?? []), ...(row.nativeTopics ?? [])]));
   const existingTopics = new Set(ideaLabels(entry.topics));
-  const decision = [entry.title,entry.coreIdea,entry.actionAndWatch,entry.watchNext,entry.invalidation,entry.remaining].filter(Boolean).join(' ').toLowerCase();
+  const decision = [entry.title,entry.pitch,entry.nextDD,entry.coreIdea,entry.actionAndWatch,entry.watchNext,entry.invalidation,entry.remaining].filter(Boolean).join(' ').toLowerCase();
   const topicOverlap = [...topics].filter(topic => existingTopics.has(topic));
   const namedTopics = [...topics].filter(topic => topic.length >= 3 && decision.includes(topic));
   if (precise) {
@@ -687,10 +688,11 @@ function ideaSnapshot(entry, materials) {
   });
   return {
     id: entry.id, title: entry.title, status: entry.status,
-    judgment: clean(entry.coreIdea || entry.thesis || entry.summary, 1800),
+    judgment: clean(entry.pitch || entry.coreIdea || entry.thesis || entry.summary, 1800),
     industryContext: entry.industryContext, evidenceBase:entry.evidenceBase,
     priorEvidence: citations(entry.evidence), priorCounterEvidence: citations(entry.counterEvidence),
-    remaining: entry.actionAndWatch || entry.remaining || entry.watchNext, invalidation: entry.invalidation,
+    remaining: entry.nextDD || entry.actionAndWatch || entry.remaining || entry.watchNext,
+    watchVariables:entry.watchVariables, invalidation: entry.invalidation,
     companies: entry.companies, topics: entry.topics,
   };
 }
@@ -726,7 +728,12 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
       })).sort((a,b) => b.match-a.match);
       const nearby = target ? [target] : ranked.filter(({ match }) => match >= 2).slice(0,7).map(({ entry }) => entry);
       const groupThrough = Math.max(...group.map(row => row.scoreThrough));
-      const trendRefs = options.replay && !target ? [] : knownEntries(db).filter(entry => entry.id.startsWith('trend-'));
+      const contextThrough=options.replay && !target ? groupThrough : now;
+      const materialGroup=ideaMaterials(group,posts,contextThrough,ideaLabels);
+      const trendRefs = options.replay && !target ? [] : readEntries(db,'trends')
+        .filter(entry=>entry.status==='active' && group.some(row=>ideaMatch(row,entry)>=2))
+        .slice(0,5).map(entry=>({id:entry.id,title:entry.title,status:entry.status,
+          judgment:entry.trendOverview||entry.summary,asOf:entry.asOf,sourcePostIds:entry.evidence}));
       const known = [...nearby.flatMap(entry => {
         if (target && options.previousAt != null) {
           const revision = entry.history.at(options.previousAt);
@@ -739,7 +746,7 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
         const revision = entry.history.findLast(row => Date.parse(row.asOf) <= groupThrough);
         return revision ? [ideaSnapshot({ ...revision,id:entry.id },materials)] : [];
       }), ...trendRefs];
-      const allowed = new Set(group.map(({ material }) => material.id));
+      const allowed = new Set(materialGroup.map(({ material }) => material.id));
       const high = new Set(group.filter(({ assessment }) => assessment.score >= threshold).map(({ material }) => material.id));
       const relatedAllowed = new Set(known.map(({ id }) => id));
       const receiptHash = hash([scope, group.map(({ material }) => fingerprints.get(material.id))]);
@@ -751,10 +758,13 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
       writeReceipt.run(receiptHash, JSON.stringify({ ...receipt, ...client.provenance(now,'ideas'), status: 'attempted' }));
       const result = await ask(client, 'ideas', {
         threshold, thresholdVersion, known, retrospective: Boolean(options.replay && !target),
+        researchAsOf:iso(contextThrough), windowStart:iso(contextThrough-30*DAY),
+        question:'围绕本轮新增信号的经营问题形成有方向的投资假设：'+group.map(r=>r.assessment.event||r.assessment.summary).join('；'),
+        triggerIds:group.map(r=>r.material.id), trends:trendRefs,
         ...(target && { updateId:target.id }),
-        posts: group.map(row => ({
-          ...row.material, assessment:row.assessment,
-          propagation:row.observations, allowNewIdea:high.has(row.material.id) && !target,
+        posts: materialGroup.map(row => ({
+          ...row.material, assessment:row.assessment, role:group.includes(row)?'trigger':'context',
+          propagation:row.observations, allowNewIdea:group.includes(row) && high.has(row.material.id) && !target,
           updateCandidates:nearby.filter(entry => target || ideaMatch(row, entry, !high.has(row.material.id)) >= 2).map(entry => entry.id),
         })),
       }, options.replay && !target ? groupThrough : now);
@@ -765,12 +775,19 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
           const cleanTitle = ideaPublicText(raw.title, 180);
           if (raw.coreIdea && ['evidenceBase','industryContext','actionAndWatch'].some(key=>!clean(raw[key],1800)))
             throw new Error('Idea 缺少完整的四块研究正文');
+          if(raw.pitch) {
+            if(['variantView','catalystAndKillSwitch','nextDD','targetScope','horizon'].some(key=>!clean(raw[key],1800))
+              || !['潜在多头','潜在空头','相对机会','事件博弈','规避'].includes(raw.stance)
+              || !Array.isArray(raw.watchVariables) || raw.watchVariables.length>3
+              || raw.watchVariables.some(v=>!v || ['name','supportIf','invalidateIf'].some(k=>!clean(v[k]))))
+              throw new Error('Idea V3 字段不完整');
+          }
           const prior = readEntries(db, 'ideas').find(item => item.id === raw.id || item.title === cleanTitle);
           const newEvidence = citations(raw.evidence, allowed);
           const newCounters = citations(raw.counterEvidence, allowed);
           const changeEvidence = citations(raw.revision?.evidence, allowed);
           const changed = [...new Set([...newEvidence, ...newCounters, ...changeEvidence])];
-          if (!changed.length) throw new Error('Idea 缺少可核验的本批证据');
+          if (!changed.length || !group.some(row=>changed.includes(row.material.id))) throw new Error('Idea 缺少可核验的触发帖证据');
           if (target && prior?.id !== target.id) continue;
           if (raw.id && !nearby.some(entry => entry.id === prior?.id)) continue;
           if (prior && !target && !changed.some(id => high.has(id) || ideaMatch(materials.get(id),prior,true) >= 2)) continue;
@@ -795,15 +812,16 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
             .filter(id => !freshCounter.has(id) || freshSupport.has(id));
           const counterEvidence = canonicalEvidence([...(prior?.counterEvidence ?? []), ...newCounters], rootIds, retained)
             .filter(id => !evidence.includes(id));
-          const maturity = ideaMaturities.includes(raw.maturity) ? raw.maturity : (prior?.maturity ?? ideaMaturities[0]);
-          const fields = Object.fromEntries(['coreIdea','evidenceBase','industryContext','actionAndWatch','thesis','catalyst','facts','authorView','inference','risk','invalidation']
+          const maturity = [...ideaMaturities,'早期线索','持续跟踪','具备定价参照'].includes(raw.maturity) ? raw.maturity : (prior?.maturity ?? ideaMaturities[0]);
+          const fields = Object.fromEntries(['pitch','variantView','catalystAndKillSwitch','nextDD','coreIdea','evidenceBase','industryContext','actionAndWatch','thesis','catalyst','facts','authorView','inference','risk','invalidation']
             .map(key => [key,ideaPublicText(raw[key],1800) || prior?.[key] || '']));
           const cleaned = {
             ...raw, title: cleanTitle, summary: ideaPublicText(raw.summary,1_600),
-            watchNext: ideaPublicText(raw.actionAndWatch || raw.watchNext,800) || prior?.watchNext,
+            watchNext: ideaPublicText(raw.nextDD || raw.actionAndWatch || raw.watchNext,800) || prior?.watchNext,
           };
           const next = entryUpdate(cleaned, prior, evidence, counterEvidence, relatedAllowed, now, {
-            ...fields, ...(raw.coreIdea && {researchFormat:2}), ...(raw.webSources && {webSources:raw.webSources}), maturity, threshold, thresholdVersion, provenance,
+            ...fields, ...(raw.coreIdea && {researchFormat:2}),
+            ...(raw.pitch && {researchFormat:3,stance:clean(raw.stance,40),targetScope:clean(raw.targetScope,300),horizon:clean(raw.horizon,200),watchVariables:raw.watchVariables??[]}), ...(raw.webSources && {webSources:raw.webSources}), maturity, threshold, thresholdVersion, provenance,
             previousJudgment: ideaPublicText(raw.revision?.previousJudgment,600),
             newEvidence: ideaPublicText(raw.revision?.newEvidence,600),
             change: ideaPublicText(raw.revision?.change,600),
@@ -822,7 +840,7 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
         writeReceipt.run(receiptHash,JSON.stringify({ ...receipt, ...provenance, status:'completed', published }));
       });
     };
-    const groups = batches(pending,options.replay && !target ? 5 : 4);
+    const groups = ideaGroups(pending,ideaLabels).flatMap(group=>batches(group,options.replay && !target ? 5 : 4));
     const parallel = options.replay && !target ? 6 : 1;
     for (let index = 0; index < groups.length; index += parallel) {
       const prepared = await Promise.allSettled(groups.slice(index,index+parallel).map(processBatch));
@@ -925,14 +943,14 @@ const ideaTrackingInstructions = '\n本轮仅做Idea趋势跟踪。known中的�
 export function ideaTrackingPrior(idea, existing) {
   const prior=existing.find(e=>e.sourceIdeaId===idea.id && !e.mergedInto);
   const originalIdea=prior?.originalIdea ?? {
-    id:idea.id, title:idea.title, judgment:idea.coreIdea||idea.thesis||idea.summary,
+    id:idea.id, title:idea.title, judgment:idea.pitch||idea.coreIdea||idea.thesis||idea.summary,
     asOf:idea.asOf||idea.generatedAt, evidence:idea.evidence, counterEvidence:idea.counterEvidence,
-    verification:idea.actionAndWatch||idea.invalidation||idea.watchNext,
+    verification:idea.catalystAndKillSwitch||idea.actionAndWatch||idea.invalidation||idea.watchNext, watchVariables:idea.watchVariables,
   };
   return { ...prior, id:prior?.id||'trend-idea-'+hash(idea.id).slice(0,16),
     title:prior?.title||idea.title, status:'active', stage:prior?.stage||'初现',
     summary:clean(prior?.summary||originalIdea.judgment,200), timeline:prior?.timeline||[],
-    sourceIdeaId:idea.id, originalIdea, currentIdea:(idea.coreIdea||idea.thesis||idea.summary)!==originalIdea.judgment ? {title:idea.title,judgment:idea.coreIdea||idea.thesis||idea.summary,asOf:idea.asOf||idea.generatedAt} : undefined };
+    sourceIdeaId:idea.id, originalIdea, currentIdea:{title:idea.title,judgment:idea.pitch||idea.coreIdea||idea.thesis||idea.summary,asOf:idea.asOf||idea.generatedAt,watchVariables:idea.watchVariables,verification:idea.catalystAndKillSwitch||idea.actionAndWatch||idea.watchNext} };
 }
 
 

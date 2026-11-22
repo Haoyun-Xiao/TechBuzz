@@ -11,7 +11,7 @@ function post(id, day, extra) {
 function fakeModel(log, mode = {}) {
   return async ({ kind, input }) => {
     log.push({ kind, input });
-    const ids = (input.posts ?? input.sources ?? []).map(({ id }) => id);
+    const ids = kind==='ideas' ? input.triggerIds : (input.posts ?? input.sources ?? []).map(({ id }) => id);
     if (kind === 'score') return {
       scores: input.posts.map(({ id }) => ({
         id,
@@ -84,7 +84,9 @@ test('四项评分、独立的 Idea / 多趋势、上午八点日报和历史追
   assert.equal(result.ideaReceipts[0].status, 'completed');
   assert.deepEqual(result.ideaReceipts[0].posts, [{ id: 'high', score: 85 }, { id: 'other', score: 85 }]);
   const ideaInput = log.find(({ kind }) => kind === 'ideas').input;
-  assert.deepEqual(ideaInput.posts.map(({ id }) => id), ['high', 'other']);
+  assert.deepEqual(ideaInput.posts.map(({ id }) => id), ['high', 'low', 'other']);
+  assert.deepEqual(ideaInput.triggerIds,['high','other']);
+  assert.equal(ideaInput.posts.find(p=>p.id==='low').allowNewIdea,false);
   assert.equal(ideaInput.posts[0].text, high.text);
   assert.equal(ideaInput.posts[0].quoted.text, high.quoted.text);
   assert.deepEqual(ideaInput.posts[0].thread, []);

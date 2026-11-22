@@ -44,6 +44,7 @@ export function EntryCard({ item, type, data, saved }: { item: ResearchEntry; ty
       <h2 className="min-w-0 flex-1 pt-1.5 text-[16px] font-semibold leading-normal text-ink"><Link to={href} className="hover:text-accent">{item.title || nameOf[type]}</Link></h2>
       <SaveButton entry={key} data={data} saved={saved} />
     </div>
+    {item.stance && <p className="mt-2 text-xs text-accent">{item.stance}{item.horizon ? " · "+item.horizon : ""}</p>}
     {item.maturity && <div className="mt-2"><Badge>{item.maturity}</Badge></div>}
     {item.sourceIdeaId && item.stage && <div className="mt-2"><Badge tone="accent">{item.stage}</Badge></div>}
     {item.summary && <p className="mt-1.5 line-clamp-3 text-[14px] leading-relaxed text-ink-3">{item.summary}</p>}
@@ -77,14 +78,17 @@ function ResearchBody({ item, type, data }: { item: ResearchEntry; type: "ideas"
     <WebSources sources={item.webSources} />
   </details>;
   if (type === "ideas") {
-    const blocks = [
+    const blocks = item.pitch ? [
+      ["核心下注", item.pitch], ["依据与预期差", item.variantView ?? ""],
+      ["兑现与失效", item.catalystAndKillSwitch ?? ""], ["优先尽调", item.nextDD ?? ""],
+    ] : [
       ["核心逻辑与标的", item.coreIdea || prose(item.thesis, item.change)],
       ["事实与分歧", item.evidenceBase || prose(item.facts, item.authorView, item.newEvidence)],
       ["产业背景推演", item.industryContext || prose(item.inference, item.remaining)],
       ["催化与核查", item.actionAndWatch || prose(item.catalyst, item.risk, item.invalidation, item.watchNext)],
     ];
     return <>{blocks.map(([title, text]) => text ? <Section key={title} title={title}><Paragraph>{text}</Paragraph>
-      {title === "事实与分歧" && sourceLinks}</Section> : null)}</>;
+      {(title === "事实与分歧" || title === "依据与预期差") && sourceLinks}</Section> : null)}</>;
   }
   return <>
     <Section title="趋势判断与投资关联"><Paragraph>{item.trendOverview || prose(item.summary, item.change)}</Paragraph></Section>
@@ -129,7 +133,11 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
         <Link className="font-semibold text-accent" to={`/ideas/${item.sourceIdeaId}`}>{item.originalIdea.title}</Link>
         <Paragraph>{item.originalIdea.judgment}</Paragraph>
       </section>}
+      {item.stance && <p className="mt-3 text-sm text-accent">{[item.stance,item.targetScope,item.horizon].filter(Boolean).join(" · ")}</p>}
       <ResearchBody item={item} type={type} data={data} />
+      {!!item.watchVariables?.length && <details className="mt-4"><summary className="cursor-pointer text-sm text-accent">持续验证的变量</summary>
+        {item.watchVariables.map(v=><div key={v.name} className="mt-3 text-sm"><strong>{v.name}</strong><p>支持判断 · {v.supportIf}</p><p>推翻判断 · {v.invalidateIf}</p></div>)}
+      </details>}
       {item.history?.length ? <details className="mt-6 border-t border-line pt-4">
         <summary className="cursor-pointer font-medium">历史修订（{item.history.length}）</summary>
         {[...item.history].reverse().map((entry, i) => <div key={i} className="border-b border-line-soft py-3">

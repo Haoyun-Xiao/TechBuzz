@@ -85,6 +85,14 @@ export interface EvidenceEntry {
 }
 
 export interface ResearchEntry extends EvidenceEntry {
+  stance?: string;
+  targetScope?: string;
+  horizon?: string;
+  pitch?: string;
+  variantView?: string;
+  catalystAndKillSwitch?: string;
+  nextDD?: string;
+  watchVariables?: Array<{name:string;supportIf:string;invalidateIf:string}>;
   coreIdea?: string;
   evidenceBase?: string;
   industryContext?: string;

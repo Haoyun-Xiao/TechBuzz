@@ -911,15 +911,18 @@ async function reduceTrends(client, signals, datedSources, get, put) {
   while (level.length > 36 || size({ analysis: level, sources: sourcesFor(level) }) > TREND_CONTEXT_LIMIT) {
     const groups=packs(level,TREND_CONTEXT_LIMIT,item=>size(item)+size(sourcesFor([item])),36);
     console.info('TechBuzz trend reduction','groups='+groups.length,'concurrency='+researchConcurrency());
+    let cacheHits=0;
     const next = (await parallelMap(groups,researchConcurrency(),async group=>{
       const input = { signals: group, sources: sourcesFor(group) };
       const key = hash(['reduce', TREND_BATCH_VERSION, client.signature, input]);
       const cached = get.get(key);
+      if(cached)cacheHits++;
       const compact = cached ? JSON.parse(cached.value)
         : trendSignals(await ask(client, 'trend_reduce', input), referenced(group), true).slice(0, Math.max(1, Math.floor(group.length / 3)));
       if (!cached) put.run(key, JSON.stringify(compact));
       return compact;
     })).flat();
+    console.info('TechBuzz trend reduction','cached='+cacheHits,'generated='+(groups.length-cacheHits));
     level = next;
   }
   return { analysis: level, sources: sourcesFor(level) };
@@ -1079,12 +1082,12 @@ async function prepareTrendAnalysis(db, client, recent) {
     const put = db.prepare('INSERT OR REPLACE INTO research_trend_batches VALUES (?, ?)');
     const dailyPosts=Map.groupBy(recent,({publishedMs})=>beijingDate(publishedMs));
     const groups=[...dailyPosts].flatMap(([date,rows])=>batches(rows).map(group=>({date,group})));
-    let completed=0;
+    let completed=0,cacheHits=0;
     console.info('TechBuzz trend extraction','batches='+groups.length,'concurrency='+researchConcurrency());
     const analysis=(await parallelMap(groups,researchConcurrency(),async ({date,group})=>{
       const groupDigest=hash([TREND_BATCH_VERSION,client.signature,group.map(row=>row.scoreHash)]);
       const cached=get.get(groupDigest);
-      if(cached){completed++;return JSON.parse(cached.value)}
+      if(cached){completed++;cacheHits++;return JSON.parse(cached.value)}
       const posts=group.map(({material,assessment,scoreThrough,scoredAs,hasThread})=>({...material,
         assessment:hasThread&&beijingDate(scoreThrough)>date?{score:assessment.score,scoredAs}:assessment}));
       const result=await ask(client,'trend_batch',{date,posts});
@@ -1093,6 +1096,7 @@ async function prepareTrendAnalysis(db, client, recent) {
       console.info('TechBuzz trend extraction','completed='+ ++completed+'/'+groups.length);
       return signals;
     })).flat();
+    console.info('TechBuzz trend extraction','cached='+cacheHits,'generated='+(groups.length-cacheHits));
     const datedSources = recent.map(({ material, assessment,publishedMs }) => ({
       id: material.id, date: beijingDate(publishedMs), handle: material.handle,
       evidenceKey: material.evidenceKey, score: assessment.score,

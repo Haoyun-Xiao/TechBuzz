@@ -2,7 +2,15 @@
 
 科技股投研台跟踪八个 X 账号。首页、全部动态、热点、主题和 Agent 接入使用原版 React 界面。首页按活动时间倒序展示达到研究评分门槛的精选原帖。全部动态按活动时间展示原创、回复、引用和转发，支持组合筛选。Idea、趋势、日报和收藏各有独立入口。
 
-## 本机运行
+## 快速开始
+
+- [打开演示看板](https://haoyun-xiao.github.io/TechBuzz/)：无需密钥，可浏览当前研究快照、筛选动态、阅读 Idea、趋势和日报，沿引用回查来源。
+- [下载离线 HTML](https://github.com/Haoyun-Xiao/TechBuzz/releases/latest)：下载 `TechBuzz.html` 后双击打开。
+- 实时采集、自动生成和多轮对话使用下方 Docker 版本，需要你自己的模型 API 配置。公开演示展示帖子节选，完整原文可沿 X 链接阅读。
+
+演示中的 Idea、趋势与日报来自真实运行结果，页面注明快照时间。研究内容用于提出和检验假设，来源引用可回查。
+
+## Docker 运行
 
 需要 Docker Compose。已有本机配置时直接运行以下命令。
 
@@ -10,7 +18,7 @@
 docker compose up --build -d
 ```
 
-新环境先将 `.env.example` 复制为 `.env`。为 PostgreSQL 密码、会话签名、图片签名、引擎后台密码和研究后台令牌各生成一个独立随机值（例如分别执行 `openssl rand -hex 32`）。配置 `TECHBUZZ_LLM_BASE_URL`、`TECHBUZZ_LLM_API_KEY`、`TECHBUZZ_LLM_MODEL` 和推理强度。默认以 `TECHBUZZ_X_PROVIDER=free` 从公开时间线采集，无需浏览器或采集密钥。如需切回原付费接口，设置 `TECHBUZZ_X_PROVIDER=socialdata` 和 `TECHBUZZ_SOCIALDATA_API_KEY`，再运行 `docker compose up -d`。密钥只放在本机。
+新环境先克隆仓库，或下载并解压源码，再进入项目根目录，将 `.env.example` 复制为 `.env`。为 PostgreSQL 密码、会话签名、图片签名、引擎后台密码和研究后台令牌各生成一个独立随机值（例如分别执行 `openssl rand -hex 32`）。配置 `TECHBUZZ_LLM_BASE_URL`、`TECHBUZZ_LLM_API_KEY`、`TECHBUZZ_LLM_MODEL` 和推理强度。默认配置使用 OpenCode Go 的 DeepSeek v4.1 Flash；需要具有该模型权限的有效 Go 密钥。模型接口未配置时，采集与网页仍可启动，自动研究和对话需配置后运行。默认以 `TECHBUZZ_X_PROVIDER=free` 从公开时间线采集，无需浏览器或采集密钥。如需切回原付费接口，设置 `TECHBUZZ_X_PROVIDER=socialdata` 和 `TECHBUZZ_SOCIALDATA_API_KEY`，再运行 `docker compose up -d`。密钥只放在本机。
 
 Idea、趋势最终合成和日报默认向模型提供 `web_search`。DeepSeek 通过 OpenCode Go 提出查询，研究 worker 用 Exa 的公开 MCP 检索带发布日期的网页片段。只有本次实际检索到且被条目引用的网页才列入「联网核验来源」。检索无结果时模型可沿用原帖并注明待核。设置 `TECHBUZZ_WEB_SEARCH=false` 并运行 `docker compose up -d --no-deps research-worker` 可关闭。
 
@@ -31,7 +39,7 @@ Idea、趋势最终合成和日报默认向模型提供 `web_search`。DeepSeek 
 
 ## 研究详情与历史回放
 
-Idea 详情展示旧判断、本轮材料、经营影响、证据缺口与下一次核验。达到门槛的材料可形成新假设，直接相关的低分信息也可修订旧判断。趋势沿用分批观察缓存，在最终合成时为每个时间线节点附上当日原帖。研究详情中的来源标题打开已收录的帖子，旁边的 X 链接打开发布页或被引原文。
+Idea 详情展示核心下注、依据与预期差、兑现与失效、优先尽调及跟踪变量。达到门槛的材料可形成新假设，直接相关的低分信息也可修订旧判断。趋势沿用分批观察缓存，在最终合成时为每个时间线节点附上当日原帖。研究详情中的来源标题打开已收录的帖子，旁边的 X 链接打开发布页或被引原文。
 
 历史回放使用独立的 SQLite 副本、已有评分和本机模型配置。指定日期生成的日报从当时可见的材料归并串帖，已发布版本保留在 `history`。日期之后补录的材料会标注覆盖口径。以下命令由项目根目录执行。
 
@@ -59,7 +67,9 @@ python3 engine/scripts/offline/export.py ~/Downloads/TechBuzz.html
 
 单文件包含导出时的动态、串帖、研究卡片、日报和主题。原帖链接需要联网，在线采集与 Agent 服务仍通过 Docker 运行。
 
-`demo/snapshot.json` 是已导出的研究快照。可用 `docker compose run --rm -v "$PWD/.runtime/site:/output" research node export.mjs /output` 从当前研究数据库重新导出，再在该目录启动静态文件服务。
+`demo/index.html` 是当前公开演示。导出公开节选版可执行 `python3 engine/scripts/offline/export.py --public demo/index.html`。
+
+`demo/snapshot.json` 仅作为冷启动时核验和导入帖子的样本目录，包含较早的研发样例，不用于当前 Pages 展示。正式启动不会导入其中的旧研究结论。
 
 复用代码和字体的声明见 [第三方说明](THIRD_PARTY_NOTICES.md)。
 
@@ -77,3 +87,9 @@ python3 engine/scripts/offline/export.py ~/Downloads/TechBuzz.html
 已有的 `/agent`、MCP 和只读 API 保留。配置与接口见 [助手说明](assistant/README.md)，本次合并与回退见 [本地合并记录](docs/ASSISTANT_LOCAL_MERGE.md)。
 
 Idea V3 按新增信号的具体议题和经营变量组包，补入最近30天相关上下文与低分材料。背景单元不具备新建资格，输出必须引用本轮触发帖；历史材料不会因此被标成新处理。对话研究助手的详情接口可读取完整 V3 字段，Idea 趋势跟踪同步获得假设与验证变量。
+
+## 发布验收
+
+本版已从 Git 的干净副本，在独立端口和全新数据卷中完成 Docker 构建与启动；八个账号各完成一次采集，配置模型密钥后的真实问答及引用回查通过。首次回填和研究生成需要时间，空库不会自动获得开发机的研究结果；审阅现成成果请使用公开快照。
+
+后台先完成 Idea，再运行趋势。独立评分、提取和同层压缩可并发，默认上限12；相关 Idea 顺序更新。常规趋势简版保留两条重点，Idea 跟踪独立展示实际更新与待验证基线。

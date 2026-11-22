@@ -9,6 +9,7 @@ import { postLookup, reportPath, stamp, topicPath, type Dashboard, type Generati
 import { useSaved } from "./saved";
 
 const statuses: Record<string, string> = {
+  snapshot: "已保存快照",
   unconfigured: "待配置", backfilling: "回补中", "catching-up": "补读中",
   empty: "已查无新增", ok: "已生成", completed: "已生成", complete: "已生成", done: "已生成", success: "已生成",
   error: "生成失败", failed: "生成失败", partial: "部分完成", unavailable: "不可用", awaiting: "待运行",

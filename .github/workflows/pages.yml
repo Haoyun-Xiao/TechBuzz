@@ -2,7 +2,7 @@ name: TechBuzz Pages
 on:
   push:
     branches: [main]
-    paths: ['public/**', 'demo/snapshot.json', '.github/workflows/pages.yml']
+    paths: ['demo/index.html', '.github/workflows/pages.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,19 +21,10 @@ jobs:
       - uses: actions/checkout@v4
       - id: pages
         uses: actions/configure-pages@v5
-      - env:
-          SITE_URL: ${{ steps.pages.outputs.base_url }}
-        run: |
+      - run: |
           mkdir site
-          cp -R public/. site/
-          cp demo/snapshot.json site/
+          cp demo/index.html site/index.html
           touch site/.nojekyll
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          page = Path("site/index.html")
-          page.write_text(page.read_text().replace('content="./share-card.png"', 'content="' + os.environ["SITE_URL"].rstrip("/") + '/share-card.png"'))
-          PY
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site

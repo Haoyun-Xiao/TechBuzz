@@ -1,5 +1,5 @@
 import { createRoot } from "react-dom/client";
-import { createHashRouter, RouterProvider, Link, useLocation } from "react-router";
+import { createHashRouter, RouterProvider, Link, Navigate, useLocation } from "react-router";
 import { useEffect } from "react";
 import { ResearchFeed, feedPage } from "../../apps/web/app/features/research/ResearchFeed";
 import { ResearchEntries, ResearchStory, ResearchHot, ResearchTopics, ResearchSources } from "../../apps/web/app/features/research/ResearchViews";
@@ -22,6 +22,7 @@ function Page() {
   useEffect(() => {
     window.scrollTo(0,0);
     for (const a of document.querySelectorAll("nav a[href^='#/']")) {
+      if (a.closest("#offline-app")) continue;
       const active = a.getAttribute("href")!.split("?")[0] === "#" + (pathname === "/" ? "/featured" : pathname);
       if (active) a.setAttribute("aria-current","page"); else a.removeAttribute("aria-current");
     }
@@ -30,7 +31,13 @@ function Page() {
     const featured = section !== "all";
     return <ResearchFeed featured={featured} feed={feedPage(data,params,featured)} />;
   }
-  if (section === "ideas" || section === "trends") return <ResearchEntries type={section} item={data[section].find(e=>e.id===id)} data={data} />;
+  if (section === "ideas" || section === "trends") {
+    const item = [...data[section], ...(section==="trends"?data.archivedTrends??[]:[])].find(e=>e.id===id);
+    if(item?.mergedInto) return <Navigate replace to={"/trends/"+item.mergedInto}/>;
+    if(id&&!item) return <p>此记录未收录在当前快照。<Link to={"/"+section}>返回列表</Link></p>;
+    return <ResearchEntries type={section} item={item} data={data}/>;
+  }
+  if (section === "assistant") return <section><h1>研究助手</h1><p>当前页面展示已生成的研究快照。实时对话需要运行 Docker 版本并配置自己的模型密钥。</p><p><a href="https://github.com/Haoyun-Xiao/TechBuzz#快速开始" target="_blank" rel="noopener noreferrer">查看运行说明</a></p></section>;
   if (section === "sources") return <ResearchSources data={data} />;
   if (section === "hot") return <ResearchHot data={data} />;
   if (section === "story") {

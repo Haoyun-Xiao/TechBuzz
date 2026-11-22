@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 parser = argparse.ArgumentParser()
 parser.add_argument("output", type=Path)
 parser.add_argument("--base", default="http://127.0.0.1:19282")
+parser.add_argument("--public", action="store_true", help="Export short post excerpts for public distribution")
 args = parser.parse_args()
 engine = Path(__file__).resolve().parents[2]
 base = args.base.rstrip("/")
@@ -50,12 +51,25 @@ def clean(root):
 
 data = json.loads(read("/api/dashboard"))
 keys = ("generatedAt", "threshold", "scores", "ideas", "trends", "reports", "hot", "singleHot",
-        "generation", "topics", "activities", "featured", "posts", "sources")
-data = {k: data[k] for k in keys}
+        "generation", "topics", "activities", "featured", "posts", "sources", "archivedTrends")
+data = {k: data[k] for k in keys if k in data}
 post_keys = ("id", "nativeArticleId", "handle", "authorName", "url", "publishedAt", "kind",
              "text", "textZh", "quotedTextZh", "quoted", "article", "repostOf", "replyTo",
              "threadRootId", "contextStatus", "excerpt")
 data["posts"] = [{k: p[k] for k in post_keys if k in p} for p in data["posts"]]
+if args.public:
+    def excerpt(text):
+        words = str(text or "").split()
+        return " ".join(words[:18])[:40] + ("…" if len(str(text or "")) > 40 else "")
+    for post in data["posts"]:
+        for key in ("text", "textZh", "quotedTextZh", "excerpt"):
+            if key in post:
+                post[key] = excerpt(post[key])
+        for key in ("quoted", "replyTo", "repostOf", "article"):
+            if isinstance(post.get(key), dict):
+                post[key] = {k: post[key][k] for k in ("id", "handle", "authorName", "url", "publishedAt", "title") if k in post[key]}
+    data["generation"] = {kind: {**value, "status": "snapshot", "error": None} for kind, value in data["generation"].items()}
+
 for row in data["activities"] + data["featured"]:
     row.pop("post", None)
 source_keys = ("handle","lastSuccess","lastAttempt","status","coverageStart","coverageEnd",
@@ -71,9 +85,12 @@ target.append(app)
 for tag in shell.select("head > *, body > script"):
     tag.decompose()
 clean(shell.body)
+for button in shell.body.select("button"):
+    button["disabled"] = ""
+    button["title"] = "快照外观固定；完整功能请运行 Docker 版本"
 date = datetime.fromisoformat(data["generatedAt"].replace("Z","+00:00")).astimezone(ZoneInfo("Asia/Shanghai"))
 note = shell.new_tag("p", attrs={"class":"text-xs text-ink-4 mb-2"})
-note.string = "TechBuzz 本地快照 · " + date.strftime("%Y-%m-%d %H:%M 北京时间")
+note.string = "TechBuzz 研究快照 · " + date.strftime("%Y-%m-%d %H:%M 北京时间") + (" · 帖子为节选，研究结果保留；实时采集、生成和对话请运行 Docker 版。" if args.public else "")
 app.insert_before(note)
 static = {}
 paths = ["/about","/more","/agent"] + ["/daily/"+r["date"] for r in data["reports"]]

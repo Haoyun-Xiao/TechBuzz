@@ -1131,7 +1131,7 @@ async function makeTrends(db, client, posts, now, trackingMode = 'regular', getP
     return () => {
       for (const entry of readEntries(db, 'trends')) {
         const citations = [...entry.evidence, ...entry.counterEvidence];
-        if (Boolean(entry.sourceIdeaId)===(trackingMode==='idea') && entry.status === 'active' && !updates.has(entry.id) && !citations.some((id) => allowed.has(id))) {
+        if (Boolean(entry.sourceIdeaId)===(trackingMode==='idea') && entry.status === 'active' && entry.trackingStatus!=='awaiting-evidence' && !updates.has(entry.id) && !citations.some((id) => allowed.has(id))) {
           updates.set(entry.id, archiveEntry(entry, now, '近 30 天窗口内没有剩余证据'));
         }
       }

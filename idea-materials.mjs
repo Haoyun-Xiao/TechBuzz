@@ -50,5 +50,5 @@ export function ideaLanes(rows, normalize, related = () => []) {
     lane.rows.sort((a,b)=>a.publishedMs-b.publishedMs||a.material.id.localeCompare(b.material.id));
     lanes.push(lane);
   }
-  return lanes.map(lane=>lane.rows);
+  return lanes.map(lane=>lane.rows).sort((a,b)=>b.length-a.length);
 }

@@ -856,7 +856,7 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
     console.info('TechBuzz ideas', 'pending='+pending.length,'lanes='+lanes.length);
     let completed=0;
     await parallelMap(lanes,Math.min(6,researchConcurrency()),async lane=>{
-      for(const group of batches(lane,4)){
+      for(const group of batches(lane,10)){
         (await processBatch(group))();
         completed+=group.length;
         console.info('TechBuzz ideas','completed='+completed+'/'+pending.length);
@@ -962,7 +962,7 @@ export function ensureIdeaTracking(db, idea, now = Date.now()) {
   const baseline=ideaTrackingPrior(idea,existing);
   putEntry(db,'trends',{...baseline,title:'验证进展 · '+idea.title,
     summary:'跟踪已建立，等待新增证据检验原假设。',
-    stage:'待验证',trackingStatus:'awaiting-evidence',trackingKind:'idea',
+    stage:'待验证',trackingStatus:'awaiting-evidence',trackingKind:'idea',researchFormat:2,
     companies:idea.companies??[],topics:idea.topics??[],
     evidence:[],counterEvidence:[],relatedIds:[idea.id],history:[],timeline:[],
     watchVariables:idea.watchVariables??[],

@@ -117,9 +117,41 @@ export function PostCard({ post, activity, data, saved, at, fullTime }: {
     star={<SaveButton entry={`post/${post.id}`} data={data} saved={saved} />} />;
 }
 
-export function PostList({ rows, data, saved, timeline = true }: { rows: Activity[]; data: Dashboard; saved: string[]; timeline?: boolean }) {
+function ThreadReply({ post, index, total }: { post: Post; index: number; total: number }) {
+  const [original, setOriginal] = useState(false);
+  return <li className="px-4 py-3">
+    <div className="mb-1 flex flex-wrap items-center gap-2 text-xs text-ink-3"><span>{index}/{total}</span>
+      <Link className="text-accent hover:underline" to={postPath(post.id)}>@{post.handle} · {stamp(post.publishedAt)}</Link>
+      {hasTranslation(post) && <LanguageButton original={original} onChange={() => setOriginal(!original)} />}
+    </div>
+    <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-ink">{(!original && post.textZh) || post.text || post.article?.text || post.excerpt}</p>
+    <Context label="引用" post={post.quoted} text={original ? undefined : post.quotedTextZh} />
+  </li>;
+}
+
+function ThreadStack({ parts, data, saved }: { parts: Activity[]; data: Dashboard; saved: string[] }) {
+  const [open, setOpen] = useState(false);
+  const first = parts[0]!;
+  return <div className="relative isolate mb-2">
+    {!open && <div aria-hidden="true" className="pointer-events-none absolute inset-x-2 -bottom-1.5 top-2 -z-10 rounded-xl border border-line bg-surface shadow-sm after:absolute after:inset-x-2 after:-bottom-1 after:h-1 after:rounded-b-xl after:border after:border-line after:bg-surface" />}
+    <div className="rounded-xl border border-line bg-surface">
+      <PostCard activity={first} post={first.post} data={data} saved={saved} fullTime />
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} className="block w-full rounded-b-xl border-t border-line px-4 py-2.5 text-left text-sm font-medium text-accent hover:bg-bg-sunk">
+        {open ? "收起串帖" : "展开串帖"} · {parts.length} 条 <span aria-hidden="true">{open ? "⌃" : "⌄"}</span>
+      </button>
+      {open && <ol start={2} className="divide-y divide-line border-t border-line">
+        {parts.slice(1).map(({ post }, i) => <ThreadReply key={post.id} post={post} index={i + 2} total={parts.length} />)}
+      </ol>}
+    </div>
+  </div>;
+}
+
+export function PostList({ rows, data, saved, timeline = true, threads = {} }: { rows: Activity[]; data: Dashboard; saved: string[]; timeline?: boolean; threads?: Record<string, Activity[]> }) {
+  const card = (row: Activity) => threads[row.id]
+    ? <ThreadStack parts={threads[row.id]!} data={data} saved={saved} />
+    : <PostCard activity={row} post={row.post} data={data} saved={saved} at={timeline ? row.activityAt ?? undefined : undefined} fullTime={!timeline} />;
   if (!timeline) return <div className="divide-y divide-line-soft lg:space-y-3 lg:divide-y-0">{rows.map((row) => (
-    <div key={row.id} className="py-3 lg:py-0"><PostCard activity={row} post={row.post} data={data} saved={saved} fullTime /></div>
+    <div key={row.id} className="py-3 lg:py-0">{card(row)}</div>
   ))}</div>;
   const days = new Map<string, Activity[]>();
   for (const row of rows) {
@@ -134,7 +166,7 @@ export function PostList({ rows, data, saved, timeline = true }: { rows: Activit
       <section key={day}>
         <DayHeader day={day} today={beijingDate(data.generatedAt)} count={group.length} />
         <ol>{group.map((row) => <TimelineSlot key={row.id} at={row.activityAt!} dataKey={row.id}>
-          <PostCard activity={row} post={row.post} data={data} saved={saved} at={row.activityAt!} />
+          {card(row)}
         </TimelineSlot>)}</ol>
       </section>
     ))}
@@ -179,6 +211,12 @@ export function PostDetail({ post, activity, data, saved }: { post: Post; activi
       {hasTranslation(post) && <div className="mt-4 text-sm"><LanguageButton original={original} onChange={() => setOriginal(!original)} /></div>}
       {text ? <p className="mt-4 whitespace-pre-wrap break-words">{text}</p> : <p className="mt-4 text-sm text-ink-4">正文暂不可读</p>}
       {activity?.category && <p className="mt-2 text-sm"><Link to={`/all?category=${encodeURIComponent(activity.category)}`} className="text-accent hover:underline">{activity.category}</Link></p>}
+      {data.posts.length > 1 && <details className="mt-4 rounded-tile border border-line p-4">
+        <summary className="cursor-pointer font-semibold">同串帖子（{data.posts.length} 条，共用一次评分）</summary>
+        <ol className="mt-2 space-y-3">{[...data.posts].sort((a,b) => (a.publishedAt ?? "").localeCompare(b.publishedAt ?? "") || a.id.localeCompare(b.id)).map(part =>
+          <li key={part.id}><Link className="text-accent" to={postPath(part.id)}>@{part.handle} · {stamp(part.publishedAt)}</Link>
+            <p className="whitespace-pre-wrap">{(!original && part.textZh) || part.text}</p></li>)}</ol>
+      </details>}
       <Context label="引用" post={post.quoted} text={original ? undefined : post.quotedTextZh} />
       <Context label="回复上文" post={post.replyTo} />
       <Context label="转发原帖" post={post.repostOf} />

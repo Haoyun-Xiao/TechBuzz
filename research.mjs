@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Readable } from 'node:stream';
 import { createInterface } from 'node:readline';
@@ -453,12 +454,12 @@ async function runJob(db, kind, scope, inputHash, now, work, through = null) {
   }
 }
 
-async function scorePosts(db, client, posts, now) {
+async function scorePosts(db, client, posts, now, readOnly = false) {
   const { units, rootIds } = groupThreads(posts, now);
   const byRoot = new Map(units.map((unit) => [unit.material.id, unit]));
   const contentHashes = new Map(units.map(({ material, digest }) => [material.id, hash([SCORING_VERSION, client.signature, digest])]));
   const cached = new Map(db.prepare('SELECT post_id, input_hash FROM research_scores').all().map((row) => [row.post_id, row.input_hash]));
-  const jobsOk = await runJob(db, 'score', 'current', hash([[...contentHashes], [...rootIds]]), now, async () => {
+  const jobsOk = !readOnly && await runJob(db, 'score', 'current', hash([[...contentHashes], [...rootIds]]), now, async () => {
     const pending = units.filter(({ material }) => cached.get(material.id) !== contentHashes.get(material.id));
     const write = db.prepare(`INSERT INTO research_scores VALUES (?, ?, ?)
       ON CONFLICT(post_id) DO UPDATE SET input_hash = excluded.input_hash, value = excluded.value`);
@@ -862,12 +863,12 @@ function reportEntries(db, kind, allowed, date) {
   }).filter(Boolean);
 }
 
-async function makeReport(db, client, posts, now) {
+async function makeReport(db, client, posts, now, { allowPendingScores = false } = {}) {
   const todayStart = dayStart(beijingDate(now));
   if (now < todayStart + 8 * HOUR) return;
   const date = beijingDate(todayStart - DAY);
   const daily = activeInWindow(posts,todayStart-DAY,todayStart);
-  if (daily.some(({ assessment }) => !assessment)) return;
+  if (!allowPendingScores && daily.some(({ assessment }) => !assessment)) return;
   const allowed = new Set(daily.map(({ material }) => material.id));
   const material = daily.map(({ material, assessment, scoreThrough }) => {
     const visible = source(material, todayStart - 1);
@@ -919,6 +920,42 @@ async function makeReport(db, client, posts, now) {
       id, ...revision, updatedAt: iso(now), history: [...history, revision],
     });
   }, daily.length ? iso(daily.at(-1).publishedMs) : null);
+}
+
+export async function runResearchModule(db, posts, kind) {
+  const client = modelClient(db, {});
+  let now = Date.now();
+  if (kind === 'trends') {
+    const previous = db.prepare("SELECT status, updated_at FROM research_jobs WHERE kind='trends' AND scope='current'").get();
+    if (previous && previous.status !== 'completed' && beijingDate(Date.parse(previous.updated_at)) !== beijingDate(now)) {
+      now = Date.parse(previous.updated_at);
+    }
+  }
+  const rows = knownPosts(posts, now);
+  if (kind === 'report') {
+    const cached = await scorePosts(db, client, rows, now, true);
+    return makeReport(db, client, cached.rows, now, { allowPendingScores: true });
+  }
+  if (kind === 'ideas') {
+    const scored = await scorePosts(db, client, rows, now);
+    if (scored.complete) await makeIdeas(db, client, scored.units, scored.rootIds, now, settings(db));
+    return;
+  }
+  if (kind !== 'trends') throw new Error('Unknown research module');
+  let scored = await scorePosts(db, client, rows, now, true);
+  if (beijingDate(now) !== beijingDate(Date.now()) && scored.rows.some(row => !row.assessment)) {
+    // Historical scores must not overwrite current-day scores or aliases.
+    const historical = new DatabaseSync(':memory:');
+    try {
+      initResearch(historical);
+      const copy = historical.prepare('INSERT INTO research_scores VALUES (?,?,?)');
+      transaction(historical, () => {
+        for (const r of db.prepare('SELECT * FROM research_scores').all()) copy.run(r.post_id, r.input_hash, r.value);
+      });
+      scored = await scorePosts(historical, client, rows, now);
+    } finally { historical.close(); }
+  }
+  await makeTrends(db, client, scored.rows, now);
 }
 
 export async function analyze(db, posts, options = {}) {

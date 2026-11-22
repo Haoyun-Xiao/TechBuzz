@@ -68,7 +68,7 @@ export function researchRows(data: Dashboard, params: URLSearchParams, featured 
     entries = entries.flatMap((row) => eligible(row) ? [row] : replacements.has(row.postId) ? [replacements.get(row.postId)!] : []);
   }
   const filtered = researchFilters(data, entries, params, topic, asOf);
-  if (featured) return { known: filtered.sort(compareScore), unknown: [], asOf };
+  if (featured) return { known: filtered.sort(order), unknown: [], asOf };
   const known = filtered.filter((row) => row.timeBasis !== "unknown" && Number.isFinite(instant(row.activityAt)));
   const unknown = filtered.filter((row) => row.timeBasis === "unknown" || !Number.isFinite(instant(row.activityAt)));
   const sort = params.get("sort");
@@ -88,14 +88,40 @@ function pageOf(params: URLSearchParams, key: string, total: number, size: numbe
 
 export function feedPage(data: Dashboard, params: URLSearchParams, featured = false, topic?: Topic) {
   const rows = researchRows(data, params, featured, topic);
-  const known = pageOf(params, "page", rows.known.length, PAGE_SIZE);
+  const rootId = (r: Activity) => data.scores[r.postId]?.scoredAs || r.post.threadRootId || r.postId;
+  const grouped = new Map<string, Activity[]>();
+  const knownHeads = rows.known.filter(row => {
+    if (row.kind === "repost") return true;
+    const id = rootId(row);
+    const group = grouped.get(id);
+    if (group) { group.push(row); return false; }
+    grouped.set(id, [row]);
+    return true;
+  });
+  // Selected rows contain just the scored root. Supply the other visible parts as reading context.
+  if (featured || ["1", "true"].includes(params.get("onlyFeatured") ?? "")) {
+    const contextParams = new URLSearchParams(params);
+    contextParams.delete("onlyFeatured");
+    for (const row of researchFilters(data, data.activities, contextParams, topic, rows.asOf)) {
+      const group = grouped.get(rootId(row));
+      if (row.kind !== "repost" && group && !group.some(part => part.postId === row.postId)) group.push(row);
+    }
+  }
+  const known = pageOf(params, "page", knownHeads.length, PAGE_SIZE);
   const unknown = pageOf(params, "unknownPage", rows.unknown.length, UNKNOWN_PAGE_SIZE);
-  const knownRows = rows.known.slice(known.start, known.start + PAGE_SIZE);
+  const knownRows = knownHeads.slice(known.start, known.start + PAGE_SIZE);
   const unknownRows = rows.unknown.slice(unknown.start, unknown.start + UNKNOWN_PAGE_SIZE);
   const posts = new Map([...knownRows, ...unknownRows].map((row) => [row.postId, previewPost(row.post)]));
+  const threads: Record<string, Activity[]> = {};
+  for (const head of knownRows) {
+    const parts = head.kind !== "repost" && grouped.get(rootId(head));
+    if (parts && parts.length > 1) {
+      threads[head.id] = [...parts].sort((a, b) => (a.post.publishedAt ?? "").localeCompare(b.post.publishedAt ?? "") || a.postId.localeCompare(b.postId));
+    }
+  }
   const simplify = (row: Activity) => ({ ...row, post: posts.get(row.postId)! });
   return {
-    asOf: rows.asOf,
+    threads, asOf: rows.asOf,
     known: { ...known, total: rows.known.length, rows: knownRows.map(simplify) },
     unknown: { ...unknown, total: rows.unknown.length, rows: unknownRows.map(simplify) },
     accounts: [...new Set([...data.sources.map((source) => source.handle), ...data.activities.map((row) => row.handle)])].filter(Boolean).sort((a, b) => a.localeCompare(b, "en")),
@@ -144,7 +170,7 @@ export function ResearchFeed({ feed, featured = false }: { feed: ReturnType<type
   return <div className="pb-8">
     <Heading title={title} back={topic ? { to: "/topics", label: "主题" } : undefined} />
     {featured ? (
-      <p className="mb-4 text-[13px] text-ink-3">研究评分达到 {data.threshold} 分的精选原帖，按评分、时间排列。</p>
+      <p className="mb-4 text-[13px] text-ink-3">研究评分达到 {data.threshold} 分的精选原帖，最新动态在前。</p>
     ) : (
       <div className="mb-5 space-y-3 border-b border-line-soft pb-4">
         <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
@@ -182,7 +208,7 @@ export function ResearchFeed({ feed, featured = false }: { feed: ReturnType<type
         <p className="text-[12px] text-ink-4">共 {known.total + unknown.total} 条动态{unknown.total > 0 && `，其中 ${unknown.total} 条活动时间未知`}</p>
       </div>
     )}
-    {known.total > 0 && <PostList rows={known.rows} data={data} saved={saved} timeline={!featured && sort !== "score"} />}
+    {known.total > 0 && <PostList threads={feed.threads} rows={known.rows} data={data} saved={saved} timeline={!featured && sort !== "score"} />}
     <Pagination page={known.page} pageCount={known.count} href={pagination("page")} />
     {unknown.total > 0 && <section className="mt-8 border-t border-line pt-4">
       <h2 className="mb-1 text-lg font-semibold text-ink">转发时间未知</h2>

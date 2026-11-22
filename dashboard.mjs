@@ -16,7 +16,7 @@ function generationStatus(db, analysis, now, rows) {
     let status=job?.status ?? 'pending';
     let error=job?.error ?? null;
     const scoring=analysis.jobs.find(j=>j.kind==='score' && j.scope==='current');
-    if(scoring && ['running','failed'].includes(scoring.status) && (!updatedAt || scoring.updatedAt>=updatedAt)) {
+    if(kind !== 'report' && status !== 'running' && scoring && ['running','failed'].includes(scoring.status) && (!updatedAt || scoring.updatedAt>=updatedAt)) {
       updatedAt=scoring.updatedAt;
       if(scoring.status==='failed') {
         status='failed';

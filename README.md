@@ -1,6 +1,6 @@
 # TechBuzz
 
-科技股投研台跟踪八个 X 账号。首页、全部动态、热点、主题和 Agent 接入使用原版 React 界面。首页按研究分展示精选原帖。全部动态按活动时间展示原创、回复、引用和转发，支持组合筛选。Idea、趋势、日报和收藏各有独立入口。
+科技股投研台跟踪八个 X 账号。首页、全部动态、热点、主题和 Agent 接入使用原版 React 界面。首页按活动时间倒序展示达到研究评分门槛的精选原帖。全部动态按活动时间展示原创、回复、引用和转发，支持组合筛选。Idea、趋势、日报和收藏各有独立入口。
 
 ## 本机运行
 
@@ -28,6 +28,14 @@ docker compose up --build -d
 - 模型和采集均在后台运行。研究页显示采集错误，模型分析进行期间仍会同步新采集的内容。
 
 ## 本地快照
+
+运行本机看板后，可导出一个无需服务器、双击即可阅读的 HTML。先在 `engine/` 运行 `npm ci`，并在 Python 环境安装 `beautifulsoup4`。从项目根目录运行：
+
+```sh
+python3 engine/scripts/offline/export.py ~/Downloads/TechBuzz.html
+```
+
+单文件包含导出时的动态、串帖、研究卡片、日报和主题。原帖链接需要联网，在线采集与 Agent 服务仍通过 Docker 运行。
 
 `demo/snapshot.json` 是已导出的研究快照。可用 `docker compose run --rm -v "$PWD/.runtime/site:/output" research node export.mjs /output` 从当前研究数据库重新导出，再在该目录启动静态文件服务。
 

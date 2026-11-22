@@ -3,7 +3,7 @@ import { openDatabase } from './db.mjs';
 import { closeDb, sql } from '@techbuzz/backend/db';
 import { ENTITIES, ENTITY_TAGS, TOPIC_TAGS } from '@techbuzz/industry/taxonomy';
 import { syncResearch } from './bridge.mjs';
-import { analyze, enrichMaterials } from './research.mjs';
+import { runResearchModule, enrichMaterials } from './research.mjs';
 
 const db = openDatabase();
 const controller = new AbortController();
@@ -21,16 +21,16 @@ let latestPosts;
 async function refreshSources() {
   latestPosts = await syncResearch(db, sql, { entities:ENTITIES,companyTags:ENTITY_TAGS,topicTags:TOPIC_TAGS });
 }
-async function runResearch() {
+async function runResearch(kind) {
   if (!latestPosts) return;
   if (!process.env.TECHBUZZ_LLM_API_KEY || !process.env.TECHBUZZ_LLM_MODEL) return;
-  await analyze(db, latestPosts);
+  await runResearchModule(db, latestPosts, kind);
 }
 async function runEnrichment() {
   if (latestPosts && process.env.TECHBUZZ_LLM_API_KEY && process.env.TECHBUZZ_LLM_MODEL) await enrichMaterials(db, latestPosts);
 }
 try {
-  await Promise.all([loop(refreshSources, 60), loop(runResearch, 60), loop(runEnrichment, 60)]);
+  await Promise.all([loop(refreshSources, 60), ...['report', 'trends', 'ideas'].map(kind => loop(() => runResearch(kind), 60)), loop(runEnrichment, 60)]);
 } finally {
   db.close();
   await closeDb();

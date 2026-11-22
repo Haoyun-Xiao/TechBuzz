@@ -65,8 +65,7 @@ export function readItems(snapshot, params, siteUrl) {
   if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || new Date(`${date}T00:00:00Z`).toJSON()?.slice(0, 10) !== date)) {
     throw new PublicationError(400, 'invalid_request', 'date 必须是 YYYY-MM-DD 格式的真实日期。');
   }
-  const defaultSort = mode === 'selected' && by === 'timeline' ? 'score' : 'new';
-  const sort = oneOf(params.get('sort') === 'time' ? 'new' : params.get('sort'), 'sort', ['new', 'old', 'score'], defaultSort);
+  const sort = oneOf(params.get('sort') === 'time' ? 'new' : params.get('sort'), 'sort', ['new', 'old', 'score'], 'new');
   const company = params.get('company') ?? null;
   const topic = params.get('topic') ?? params.get('tag');
   const topicPosts = company || topic ? new Set(snapshot.topics.filter(item => company ? item.name === company && item.group === 'company' : item.name === topic)

@@ -21,10 +21,12 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const post = params.id ? postLookup(dashboard).get(params.id) : undefined;
     if (!post) throw data({ message: "not_found" }, { status: 404 });
     const activities = dashboard.activities.filter((row) => row.postId === post.id).map((row) => ({ ...row, post }));
+    const root = dashboard.scores[post.id]?.scoredAs ?? post.id;
+    const threadIds = [root, ...Object.keys(dashboard.scores).filter(id => dashboard.scores[id].scoredAs === root)];
     const activityId = url.searchParams.get("activity");
     const activity = activityId ? activities.find((row) => row.id === activityId) : activities.find((row) => row.kind !== "repost");
     return researchPage({ section: "research" as const, post, activity, path: url.pathname, dashboard: project(dashboard, {
-      ...evidenceSubset(dashboard, [post.id]), activities,
+      ...evidenceSubset(dashboard, threadIds), activities,
       featured: dashboard.featured.filter((row) => row.postId === post.id).map((row) => ({ ...row, post })),
     }) });
   }

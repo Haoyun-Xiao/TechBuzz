@@ -113,12 +113,12 @@ export function dashboardActivity(view, scores, threshold) {
     const assessment = scores[a.postId];
     const score = assessment?.score ?? null;
     const translationStatus = post.textZh ? 'translated' : (post.article?.text || post.text)?.trim() ? 'original' : 'unavailable';
-    return {...a, post, originalAuthor:post.handle, url:post.url, score, translationStatus, featured:score !== null && score >= threshold,
+    return {...a, post, originalAuthor:post.handle, url:post.url, score, translationStatus, featured:!assessment?.scoredAs && score !== null && score >= threshold,
       category:category(post,assessment), distributors:[...(distributors.get(post.id) ?? [])]};
   });
   const selected = new Map();
   for (const item of activities) if (item.featured && !selected.has(item.postId)) selected.set(item.postId,item);
-  const featured = [...selected.values()].sort((a,b)=>b.score-a.score || newest(a,b));
+  const featured = [...selected.values()].sort(newest);
   const topics = new Map();
   for (const p of view.posts) {
     const s = scores[p.id];

@@ -13,7 +13,7 @@ import { PhoneBar } from "../components/shell/PhoneBar";
 import { navUp } from "../components/shell/nav";
 import type { Screen } from "../components/shell/screens";
 
-import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { directoryTopics, loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
 import { ResearchTopics } from "../features/research/ResearchViews";
 
 export const handle: Screen = { home: navUp("/topics").tab, name: "主题" };
@@ -28,7 +28,7 @@ export async function loader({ request }: { request: Request }) {
     const selected = ["1", "true"].includes(url.searchParams.get("onlyFeatured") ?? "");
     const selectedIds = new Set(dashboard.featured.map((row) => row.postId));
     const propagation = new Map(dashboard.featured.map((row) => [row.postId, row.distributors.length]));
-    const topics = dashboard.topics.filter((topic) => topic.group === group).map((topic) => {
+    const topics = directoryTopics(dashboard).filter((topic) => topic.group === group).map((topic) => {
       const ids = selected ? topic.postIds.filter((id) => selectedIds.has(id)) : topic.postIds;
       return { name: topic.name, group: topic.group, count: selected ? ids.length : topic.count,
         propagationCount: selected ? ids.reduce((sum, id) => sum + (propagation.get(id) ?? 0), 0) : topic.propagationCount, postIds: [] };

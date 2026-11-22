@@ -19,7 +19,7 @@ import { loadParts } from "../site-modules";
 
 // Topics are reached from the topics page, as long as the site shows it.
 const UP = navUp("/topics");
-import { loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
+import { directoryTopics, loadResearch, researchEnabled, researchPage } from "../features/research/load.server";
 import { feedPage, ResearchFeed } from "../features/research/ResearchFeed";
 import { topicPath } from "../features/research/data";
 
@@ -34,7 +34,7 @@ export async function loader({ params, request }: Route.LoaderArgs) {
     const dashboard = await loadResearch(request);
     const url = new URL(request.url);
     const group = url.searchParams.get("group");
-    const topic = dashboard.topics.find((entry) => entry.name.toLowerCase() === params.slug.toLowerCase() && (!group || entry.group === group));
+    const topic = [...directoryTopics(dashboard), ...dashboard.topics].find((entry) => entry.name.toLowerCase() === params.slug.toLowerCase() && (!group || entry.group === group));
     if (!topic) throw new Response("Not found", { status: 404 });
     if (params.page) throw redirect(`${topicPath(topic)}&page=${encodeURIComponent(params.page)}`);
     return researchPage({ research: feedPage(dashboard, url.searchParams, false, topic) });

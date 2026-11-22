@@ -32,3 +32,5 @@ export function entryCards(entries: ResearchEntry[]) {
     id, title, summary, date, asOf, updatedAt, generatedAt, evidence,
   }));
 }
+
+export { directoryTopics } from "./directory";

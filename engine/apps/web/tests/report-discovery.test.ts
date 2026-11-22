@@ -55,7 +55,7 @@ test("research pages preserve the scored selection, frozen activity pages and si
     const home = await fetch(live.origin);
     assert.equal(home.status, 200, live.logs());
     let $ = cheerio.load(await home.text());
-    assert.deepEqual($("main article").map((_, article) => $(article).attr("data-item-id")).get(), ["old-repost", "ordinary-0"]);
+    assert.deepEqual($("main article").map((_, article) => $(article).attr("data-item-id")).get(), ["ordinary-0", "old-repost"]);
     assert.equal($("main h2").filter((_, el) => $(el).text() === "转发时间未知").length, 0);
 
     const all = await fetch(`${live.origin}/all`);

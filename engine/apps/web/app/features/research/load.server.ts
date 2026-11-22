@@ -21,6 +21,7 @@ export function evidenceSubset(data: Dashboard, ids: string[]) {
 
 export function entryEvidence(entry: ResearchEntry) {
   return [
+    ...(entry.changeEvidence ?? []),
     ...(entry.evidence ?? []),
     ...(entry.counterEvidence ?? []),
     ...([...(entry.sections ?? []), ...(entry.timeline ?? []), ...(entry.history ?? [])]).flatMap((row) => [...(row.evidence ?? []), ...(row.counterEvidence ?? [])]),
@@ -28,8 +29,8 @@ export function entryEvidence(entry: ResearchEntry) {
 }
 
 export function entryCards(entries: ResearchEntry[]) {
-  return entries.map(({ id, title, summary, date, asOf, updatedAt, generatedAt, evidence }) => ({
-    id, title, summary, date, asOf, updatedAt, generatedAt, evidence,
+  return entries.map(({ id, title, summary, date, asOf, updatedAt, generatedAt, evidence, maturity, change, status }) => ({
+    id, title, summary, date, asOf, updatedAt, generatedAt, evidence, maturity, change, status,
   }));
 }
 

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { analyze, initResearch, research, setThreshold } from './research.mjs';
@@ -225,9 +226,36 @@ test('较大趋势输入先分批，再压缩后送给总览模型', async () =>
   db.close();
 });
 
+test('定向回放后沿用同输入的旧趋势结果，新材料到达后继续合成', async () => {
+  const db = new DatabaseSync(':memory:');
+  initResearch(db);
+  const log = [];
+  const complete = fakeModel(log);
+  const now = '2026-11-19T07:00:00+08:00';
+  const rows = [post('high', '18')];
+  await analyze(db, rows, { now, complete });
+  const score = db.prepare("SELECT input_hash FROM research_scores WHERE post_id = 'high'").get().input_hash;
+  const oldInput = [2, ['injected', process.env.TECHBUZZ_LLM_REASONING_EFFORT || 'max'], '2026-10-21', '2026-11-19', [score]];
+  const oldFingerprint = createHash('sha256').update(JSON.stringify(oldInput)).digest('hex');
+  db.prepare("UPDATE research_jobs SET input_hash = ? WHERE kind = 'trends' AND scope = 'current'").run(oldFingerprint);
+  db.prepare("INSERT INTO research_success VALUES ('trends', 'replay:trend-existing', NULL, ?)").run(now);
+  log.length = 0;
+  await analyze(db, rows, { now, complete });
+  assert.equal(log.some(({ kind }) => kind === 'trends'), false);
+  await analyze(db, [...rows, post('low', '18')], { now, complete });
+  assert.equal(log.filter(({ kind }) => kind === 'trends').length, 1);
+  db.close();
+});
+
 test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久化模型', async (t) => {
   const db = new DatabaseSync(':memory:');
   initResearch(db);
+  const priorId = 'trend-existing';
+  const priorTrend = {
+    id: priorId, title: '既有趋势', summary: '上轮研究判断', status: 'active', relatedIds: [],
+    evidence: [], counterEvidence: [], history: [], timeline: [],
+  };
+  db.prepare('INSERT INTO research_trends VALUES (?, ?)').run(priorId, JSON.stringify(priorTrend));
   const env = {
     TECHBUZZ_LLM_BASE_URL: 'https://opencode.ai/inference/go/openai/v1',
     TECHBUZZ_LLM_API_KEY: 'test',
@@ -262,7 +290,12 @@ test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久�
       result = { signals: [{ title: 'Trend', summary: '信号', evidence: ['P1'] }] };
     } else if (kind === 'trends') {
       assert.deepEqual(input.observations[0].dates, ['2026-11-18']);
-      result = { lines: [{ title: 'Trend', summary: '趋势', prior: 0, observations: [1] }] };
+      const update = {
+        title: 'Trend', summary: '趋势', prior: 1, observations: [1], changeObservations: [1],
+        previousJudgment: '原先偏谨慎', newEvidence: '现有一手报告', change: '判断增强', remaining: '交付待查',
+        next: '核对交付', timeline: [{ date: '2026-11-18', summary: '新增交付资料', observations: [1] }],
+      };
+      result = { lines: [update, { ...update, title: '单日候选', prior: 0 }] };
     } else {
       result = { title: 'Report', summary: '日报', sections: [{ title: '摘要', summary: '材料', evidence: ['P1'] }] };
     }
@@ -273,6 +306,10 @@ test('OpenAI 兼容适配器保留精确 ID、重试坏引用与截断并持久�
   const result = await analyze(db, [post(id, '18')], { now: '2026-11-19T08:00:00+08:00', model: 'deepseek-v4.1-flash' });
   assert.equal(result.scores[id].score, 84);
   assert.deepEqual(result.ideas[0].evidence, [id]);
+  assert.equal(result.trends.length, 1);
+  assert.equal(result.trends[0].id, priorId);
+  assert.equal(result.trends[0].change, '判断增强');
+  assert.deepEqual(result.trends[0].changeEvidence, [id]);
   assert.deepEqual(result.trends[0].timeline[0].evidence, [id]);
   assert.deepEqual(result.reports[0].evidence, [id]);
   assert.ok(requests.every(({ request, url }) => request.reasoning_effort === 'max' && url.endsWith('/v1/chat/completions')));

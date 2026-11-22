@@ -67,6 +67,12 @@ export interface Activity {
 }
 
 export interface EvidenceEntry {
+  previousJudgment?: string;
+  newEvidence?: string;
+  change?: string;
+  remaining?: string;
+  changeEvidence?: string[];
+  maturity?: string;
   date?: string;
   updatedAt?: string;
   generatedAt?: string;
@@ -93,6 +99,9 @@ export interface ResearchEntry extends EvidenceEntry {
   timeline?: EvidenceEntry[];
   sections?: Array<EvidenceEntry & { title: string }>;
   history?: EvidenceEntry[];
+  ideaIds?: string[];
+  trendIds?: string[];
+  coverage?: { cutoff: string; scheduledAt: string; laterCount: number } | null;
   inputCount?: number;
 }
 
@@ -136,6 +145,8 @@ export interface Topic {
 }
 
 export interface Generation {
+  targetedCount?: number;
+  targetedThrough?: string | null;
   status: string;
   evidenceThrough?: string | null;
   lastSuccessAt?: string | null;

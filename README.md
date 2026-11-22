@@ -27,6 +27,20 @@ docker compose up --build -d
 - Compose 项目名为 `techbuzz`。卷 `engine-db` 存储引擎数据库，`engine-data` 存储引擎文件，`research-data` 存储研究数据库。旧原版和 A 股部署各自使用独立网络、端口和卷。
 - 模型和采集均在后台运行。研究页显示采集错误，模型分析进行期间仍会同步新采集的内容。
 
+## 研究详情与历史回放
+
+Idea 详情展示旧判断、本轮材料、经营影响、证据缺口与下一次核验。达到门槛的材料可形成新假设，直接相关的低分信息也可修订旧判断。趋势沿用分批观察缓存，在最终合成时为每个时间线节点附上当日原帖。研究详情中的来源标题打开已收录的帖子，旁边的 X 链接打开发布页或被引原文。
+
+历史回放使用独立的 SQLite 副本、已有评分和本机模型配置。指定日期生成的日报从当时可见的材料归并串帖，已发布版本保留在 `history`。日期之后补录的材料会标注覆盖口径。以下命令由项目根目录执行。
+
+```sh
+node --env-file=.env replay-ideas.mjs --db /path/to/review.sqlite
+node --env-file=.env replay-reports.mjs /path/to/review.sqlite 2026-11-20 2026-11-21
+node --env-file=.env replay-trend.mjs /path/to/review.sqlite <trend-id> <as-of-ISO> <new-post-ids> <earlier-post-ids>
+```
+
+历史日报可通过 `--focus <原帖ID>` 为单期指定需要核验的串帖。定时任务自行选题。趋势定向回放只更新指定趋势，两个帖子参数使用逗号分隔的原帖 ID。部署时可用 `TECHBUZZ_RESEARCH_VOLUME`、`TECHBUZZ_WEB_IMAGE`、`TECHBUZZ_RESEARCH_IMAGE` 和 `TECHBUZZ_RESEARCH_WORKER_IMAGE` 选择同一版研究库与镜像。
+
 ## 本地快照
 
 运行本机看板后，可导出一个无需服务器、双击即可阅读的 HTML。先在 `engine/` 运行 `npm ci`，并在 Python 环境安装 `beautifulsoup4`。从项目根目录运行：

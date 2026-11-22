@@ -36,7 +36,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const index = dailyIndex(dashboard.reports);
     const entry = dashboard.reports.find((report) => reportDate(report) === key);
     if (!entry) throw data({ message: "not_found" }, { status: 404 });
-    return researchPage({ research: { data: project(dashboard, {}), index, report: dailyPage(dashboard, index, entry), asOf: entry.asOf } });
+    return researchPage({ research: { data: project(dashboard, {}), index, report: dailyPage(dashboard, index, entry), asOf: entry.asOf, coverage: entry.coverage, related: [...dashboard.ideas, ...dashboard.trends].filter(item => [...(entry.ideaIds ?? []), ...(entry.trendIds ?? [])].includes(item.id)).map(item => ({id:item.id,title:item.title})) } });
   }
   if (!PATTERN[kind].test(key)) throw data({ message: "not_found" }, { status: 404 });
   const [report, { items: index }] = await Promise.all([

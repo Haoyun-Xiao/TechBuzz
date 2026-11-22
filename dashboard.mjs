@@ -29,11 +29,17 @@ function generationStatus(db, analysis, now, rows) {
     return {status,updatedAt,lastSuccessAt,error,
       evidenceThrough:success ? success.through : latestEvidence(entries.flatMap(entry=>[...(entry.evidence??[]),...(entry.counterEvidence??[])]))};
   }
+  const trends = state('trends','current',analysis.trends);
+  const targeted = db.prepare("SELECT COUNT(*) AS count, MAX(through) AS through FROM research_success WHERE kind='trends' AND scope LIKE 'replay:%'").get();
+  if (targeted.count) {
+    trends.targetedCount = targeted.count;
+    trends.targetedThrough = targeted.through;
+  }
   const report=analysis.reports.find(r=>r.date===date);
   const daily=state('report',date,report?[report]:[]);
   if(!due) {daily.status='scheduled';daily.error=null;}
   else if(report?.inputCount===0 && !report.sections?.length && daily.status==='completed') daily.status='insufficient';
-  return {ideas:state('ideas','current',analysis.ideas),trends:state('trends','current',analysis.trends),report:{...daily,date}};
+  return {ideas:state('ideas','current',analysis.ideas),trends,report:{...daily,date}};
 }
 
 export function dashboard(db, now = new Date()) {

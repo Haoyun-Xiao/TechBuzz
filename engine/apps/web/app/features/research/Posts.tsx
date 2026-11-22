@@ -258,6 +258,8 @@ export function Evidence({ ids, data }: { ids?: string[]; data: Dashboard }) {
         {post ? <>
           <Link to={postPath(post.id)} className="min-w-0 flex-1 font-medium text-ink hover:text-accent">{postTitle(post, data.scores[post.id])}</Link>
           <span className="shrink-0">@{post.handle}</span>
+          <External url={post.url}>X 原帖</External>
+          {post.quoted?.url && <External url={post.quoted.url}>被引原文{post.quoted.handle ? ` · @${post.quoted.handle}` : ""}</External>}
         </> : <span>证据 {id} 未收录</span>}
       </li>;
     })}

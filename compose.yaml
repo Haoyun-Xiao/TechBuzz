@@ -87,7 +87,7 @@ services:
     command: ["node","apps/worker/src/main.ts"]
     stop_grace_period: 515s
   research:
-    image: techbuzz-research:local
+    image: ${TECHBUZZ_RESEARCH_IMAGE:-techbuzz-research:local}
     build: .
     init: true
     restart: unless-stopped
@@ -103,11 +103,13 @@ services:
   research-worker:
     init: true
     <<: *research-runtime
+    image: ${TECHBUZZ_RESEARCH_WORKER_IMAGE:-techbuzz-engine:local}
     depends_on:
       research-import: {condition: service_completed_successfully}
     command: ["sh","-ec","exec node research/worker.mjs"]
   web:
     <<: *engine
+    image: ${TECHBUZZ_WEB_IMAGE:-techbuzz-engine:local}
     environment:
       NODE_ENV: production
       SITE_URL: http://127.0.0.1:${TECHBUZZ_PORT:-19282}
@@ -122,3 +124,4 @@ volumes:
   engine-db:
   engine-data:
   research-data:
+    name: ${TECHBUZZ_RESEARCH_VOLUME:-${COMPOSE_PROJECT_NAME:-techbuzz}_research-data}

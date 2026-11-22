@@ -5,7 +5,7 @@ import { EmptyState } from "../../components/ui/Page";
 import { PillTabs } from "../../components/ui/Tabs";
 import { IconChevronRight } from "../../components/icons";
 import { Evidence, External, Heading, SaveButton } from "./Posts";
-import { reportPath, stamp, topicPath, type Dashboard, type Generation, type HotEntry, type ResearchEntry, type Topic } from "./data";
+import { postLookup, reportPath, stamp, topicPath, type Dashboard, type Generation, type HotEntry, type ResearchEntry, type Topic } from "./data";
 import { useSaved } from "./saved";
 
 const statuses: Record<string, string> = {
@@ -21,11 +21,13 @@ export function GenerationStatus({ generation }: { generation?: Generation }) {
   return <div className="mb-4 rounded-tile border border-line bg-surface px-4 py-3 text-[13px] text-ink-3">
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
       <Badge tone={generation.error ? "hot" : "accent"}>{statuses[generation.status] ?? generation.status}</Badge>
+      {generation.targetedCount && <span>30 天全窗任务</span>}
       {generation.date && <span>目标日期 {generation.date}</span>}
       <span>证据截至 {stamp(generation.evidenceThrough)}</span>
       <span>最近成功 {stamp(generation.lastSuccessAt)}</span>
       <span>状态更新 {stamp(generation.updatedAt)}</span>
     </div>
+    {generation.targetedCount && <p className="mt-2">另有 {generation.targetedCount} 条趋势已定向复核 · 引用原帖截至 {stamp(generation.targetedThrough)}</p>}
     {generation.error && <p role="status" className="mt-2 text-hot">{generation.error}</p>}
   </div>;
 }
@@ -42,6 +44,7 @@ export function EntryCard({ item, type, data, saved }: { item: ResearchEntry; ty
       <h2 className="min-w-0 flex-1 pt-1.5 text-[16px] font-semibold leading-normal text-ink"><Link to={href} className="hover:text-accent">{item.title || nameOf[type]}</Link></h2>
       <SaveButton entry={key} data={data} saved={saved} />
     </div>
+    {item.maturity && <div className="mt-2"><Badge>{item.maturity}</Badge></div>}
     {item.summary && <p className="mt-1.5 line-clamp-3 text-[14px] leading-relaxed text-ink-3">{item.summary}</p>}
     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-ink-4">
       {item.asOf && <span>证据截至 {stamp(item.asOf)}</span>}
@@ -63,23 +66,47 @@ const fields = [
   ["趋势阶段", "stage"], ["催化剂", "catalyst"], ["风险", "risk"], ["失效条件", "invalidation"], ["下一步核对", "watchNext"],
 ] as const;
 
+const revisionFields = [
+  ["此前判断", "previousJudgment"], ["新证据", "newEvidence"], ["本次影响", "change"],
+  ["仍待核实", "remaining"], ["下一次核验", "watchNext"],
+] as const;
+
+function JudgmentChange({ item, data }: { item: ResearchEntry; data: Dashboard }) {
+  return <section className="card mt-4 px-4 py-4">
+    <div className="mb-2 flex flex-wrap items-center gap-3">
+      <h2 className="text-[17px] font-semibold text-ink">本次判断变化</h2>
+      {item.maturity && <Badge tone="accent">{item.maturity}</Badge>}
+      {item.stage && <Badge>{item.stage}</Badge>}
+    </div>
+    <dl className="divide-y divide-line-soft">
+      {revisionFields.map(([label,key]) => item[key] && <div key={key} className="py-2.5 text-sm leading-relaxed">
+        <dt className="font-semibold text-ink">{label}</dt><dd className="mt-1 text-ink-2">{item[key]}</dd>
+        {key === "newEvidence" && !!item.changeEvidence?.length && <dd><Evidence ids={item.changeEvidence} data={data} /></dd>}
+      </div>)}
+    </dl>
+  </section>;
+}
+
 export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"; data: Dashboard; item?: ResearchEntry }) {
   const saved = useSaved(data);
+  const posts = postLookup(data);
+  const evidenceThrough = item && [...(item.evidence ?? []), ...(item.counterEvidence ?? []), ...(item.changeEvidence ?? [])]
+    .map(id => posts.get(id)?.publishedAt).filter(Boolean).sort().at(-1);
   return <div className="mx-auto max-w-[var(--page-max-reading)] pb-8">
     <Heading title={item?.title ?? nameOf[type]} back={item ? { to: `/${type}`, label: nameOf[type] } : undefined} />
-    <GenerationStatus generation={data.generation[type]} />
+    {!item && <GenerationStatus generation={data.generation[type]} />}
     {item ? <>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-4">
-        <span>证据截至 {stamp(item.asOf)}</span>
-        <span>本条更新 {stamp(item.updatedAt || item.generatedAt)}</span>
+        <span>最近引用原帖 {stamp(evidenceThrough ?? item.asOf)}</span>
+        <span>本条生成 {stamp(item.generatedAt || item.updatedAt)}</span>
         <span className="ml-auto"><SaveButton entry={`${type}/${item.id}`} data={data} saved={saved} /></span>
       </div>
-      {item.summary && <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{item.summary}</p>}
+      {item.change ? <JudgmentChange item={item} data={data} /> : item.summary && <p className="mt-3 text-[15px] leading-relaxed text-ink-2">{item.summary}</p>}
       {fields.some(([, key]) => item[key]?.length) && <Section title="研究要点">
         <dl className="grid gap-3 text-[14px] leading-relaxed text-ink-2">
           {fields.map(([label, key]) => {
             const value = item[key];
-            return value?.length ? <div key={key}>
+            return value?.length && !(item.change && key === "watchNext") ? <div key={key}>
               <dt className="font-semibold text-ink">{label}</dt>
               <dd className="mt-1">{Array.isArray(value) ? value.join("、") : value}</dd>
             </div> : null;
@@ -89,14 +116,15 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
       <Section title="支持证据"><Evidence ids={item.evidence} data={data} /></Section>
       {!!item.counterEvidence?.length && <Section title="反证"><Evidence ids={item.counterEvidence} data={data} /></Section>}
       {item.timeline?.length ? <Section title="趋势演进">
-        {item.timeline.map((entry, i) => <div key={i} className="border-b border-line-soft py-3">
+        {[...item.timeline].reverse().map((entry, i) => <div key={i} className="border-b border-line-soft py-3">
           <p className="text-xs text-ink-4">{stamp(entry.date || entry.updatedAt)}</p>
           <p className="mt-2 text-sm text-ink-2">{entry.summary}</p>
           {!!entry.evidence?.length && <Evidence ids={entry.evidence} data={data} />}
+          {!!entry.counterEvidence?.length && <><span className="text-xs text-ink-4">反向依据</span><Evidence ids={entry.counterEvidence} data={data} /></>}
         </div>)}
       </Section> : null}
       {item.history?.length ? <Section title="研究修订">
-        {item.history.map((entry, i) => <div key={i} className="border-b border-line-soft py-3">
+        {[...item.history].reverse().map((entry, i) => <div key={i} className="border-b border-line-soft py-3">
           <p className="text-xs text-ink-4">{stamp(entry.generatedAt || entry.date || entry.updatedAt)}</p>
           <p className="mt-2 text-sm text-ink-2">{entry.summary}</p>
           {!!entry.evidence?.length && <Evidence ids={entry.evidence} data={data} />}
@@ -108,6 +136,7 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
           .filter((entry) => entry.id !== item.id && item.relatedIds?.includes(entry.id))
           .map((entry) => <EntryCard key={entry.id} item={entry} type={group} data={data} saved={saved} />))}</div>
       </Section> : null}
+      {data.generation[type]?.status === "failed" && <Section title="本轮生成状态"><GenerationStatus generation={data.generation[type]} /></Section>}
     </> : data[type].length ? <div className="space-y-2">
       {data[type].map((entry) => <EntryCard key={entry.id} item={entry} type={type} data={data} saved={saved} />)}
     </div> : <EmptyState title={`还没有${nameOf[type]}条目`} />}

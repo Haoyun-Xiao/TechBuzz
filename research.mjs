@@ -840,6 +840,7 @@ async function makeIdeas(db, client, posts, rootIds, now, { threshold, threshold
               .filter(id => relatedAllowed.has(id) && id !== prior?.id)])],
           });
           putEntry(db,'ideas',next);
+          ensureIdeaTracking(db,next,now);
           published.push(next.id);
         }
         for (const { material } of group) {
@@ -948,6 +949,20 @@ function trendTimeline(raw, dateById, evidence, counterEvidence, notes, finalSum
 
 const trendSynthesisPrompt = trendPrompt;
 const ideaTrackingInstructions = '\n本轮仅做Idea趋势跟踪。known中的每个prior代表一个已有投资假设，originalIdea保存原始假设、依据和验证条件；它是基线，不能当作新证据。每次最多更新4条最有实质变化的假设。必须选择prior，不得创建无对应Idea的趋势或合并不同Idea。先判断新信息是在增强、削弱、逆转还是尚未改变原假设；只针对相同经营机制的材料更新，证据不足返回空。标题扣住原Idea的行业/标的，trendOverview先讲原来押注什么，再讲这次证据改变什么；timeline展示有日期的验证进展，evidenceAndHypotheses说明尚缺的证据及下一步验证。原Idea可以跨公司或覆盖整个产业链。不要重写或改分原Idea。';
+
+export function ensureIdeaTracking(db, idea, now = Date.now()) {
+  if(idea.status!=='active' || idea.researchFormat!==3) return;
+  const existing=readEntries(db,'trends');
+  if(existing.some(t=>t.sourceIdeaId===idea.id)) return;
+  const baseline=ideaTrackingPrior(idea,existing);
+  putEntry(db,'trends',{...baseline,title:'验证进展 · '+idea.title,
+    summary:'跟踪已建立，等待新增证据检验原假设。',
+    stage:'待验证',trackingStatus:'awaiting-evidence',trackingKind:'idea',
+    evidence:[],counterEvidence:[],relatedIds:[idea.id],history:[],timeline:[],
+    watchVariables:idea.watchVariables??[],
+    firstSeen:beijingDate(now),updatedAt:iso(now),asOf:idea.asOf,generatedAt:null,
+    model:null,reasoningEffort:null});
+}
 
 export function ideaTrackingPrior(idea, existing) {
   const prior=existing.find(e=>e.sourceIdeaId===idea.id && !e.mergedInto);
@@ -1171,8 +1186,10 @@ async function publishTrendSynthesis(db, client, input, notes, now, trendId, tra
       next.sourceIdeaId=raw.sourceIdeaId;
       next.originalIdea=raw.originalIdea;
       next.trackingKind='idea';
+      next.trackingStatus='updated';
+      next.watchVariables=readEntries(db,'ideas').find(i=>i.id===raw.sourceIdeaId)?.watchVariables??[];
       next.relatedIds=[...new Set([...next.relatedIds,raw.sourceIdeaId])];
-      Object.assign(next.history.at(-1),{sourceIdeaId:next.sourceIdeaId,originalIdea:next.originalIdea,trackingKind:'idea',relatedIds:next.relatedIds});
+      Object.assign(next.history.at(-1),{sourceIdeaId:next.sourceIdeaId,originalIdea:next.originalIdea,trackingKind:'idea',trackingStatus:'updated',relatedIds:next.relatedIds});
     }
     if (updates.has(next.id)) throw new Error('模型重复更新同一个趋势');
     updates.set(next.id, next);

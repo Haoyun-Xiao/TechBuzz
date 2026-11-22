@@ -78,3 +78,22 @@ test('live progress is recoverable after refresh, with no private reasoning cont
   const finished=await(await fetch(base+'/'+s.id)).json();assert.equal(finished.running,false);assert.equal(finished.messages.at(-1).status,'stopped');assert.equal(finished.progress,null);
  }finally{await new Promise(r=>server.close(r));store.db.close();}
 });
+
+test('entering from an Idea or its tracking record loads both linked records without a broad scan',async()=>{
+ const linked={...snapshot,ideas:[{id:'idea-linked',title:'原假设',pitch:'融资成本影响股东回报',evidence:['1']}],
+  trends:[{id:'trend-linked',title:'后续验证',sourceIdeaId:'idea-linked',status:'active',trendOverview:'交付进度出现变化',evidence:['2']}]};
+ for(const context of [{type:'ideas',id:'idea-linked'},{type:'trends',id:'trend-linked'}]){
+  const store=openStore(':memory:');const session=store.create().id;
+  store.add(session,'user','这个假设后来怎么变了？');
+  const messageId=store.add(session,'assistant','','running');
+  await runTurn({store,session,messageId,question:'这个假设后来怎么变了？',context,
+   signal:signal(),snapshot:linked,sourceUrl:'',emit:()=>{},model:async({messages})=>{
+    const text=JSON.stringify(messages);assert.match(text,/融资成本影响股东回报/);assert.match(text,/交付进度出现变化/);
+    return {message:{role:'assistant',content:'原假设与后续验证均可回查。[R-idea-linked] [R-trend-linked]'}};
+   }});
+  const receipts=store.db.prepare("select detail from receipts where kind='tool'").all().map(r=>JSON.parse(r.detail));
+  assert.deepEqual(receipts.map(r=>r.name),['read_research','read_research']);
+  assert.equal(store.get(session).messages.at(-1).status,'complete');
+  store.db.close();
+ }
+});

@@ -64,3 +64,22 @@ test('pausing Idea generation still scores new material',async t=>{
  assert.equal(db.prepare('select count(*) n from research_scores').get().n,1);
  assert.equal(db.prepare('select count(*) n from research_ideas').get().n,0);
 });
+
+test('V3 ideas immediately get one explicit pending tracking baseline without fabricated updates',async()=>{
+ const {DatabaseSync}=await import('node:sqlite');
+ const {initResearch,ensureIdeaTracking,research}=await import('./research.mjs');
+ const db=new DatabaseSync(':memory:');initResearch(db);
+ const idea={id:'idea-v3-new',title:'投资假设',pitch:'检验现金回报',status:'active',researchFormat:3,
+  updatedAt:'2026-11-23T00:00:00Z',asOf:'2026-11-22T00:00:00Z',evidence:['p1'],counterEvidence:[],relatedIds:[],watchVariables:[{name:'交付',supportIf:'按期',invalidateIf:'延期'}]};
+ db.prepare('insert into research_ideas values (?,?)').run(idea.id,JSON.stringify(idea));
+ ensureIdeaTracking(db,idea,Date.parse('2026-11-23'));
+ ensureIdeaTracking(db,idea,Date.parse('2026-11-24'));
+ const result=research(db);
+ assert.equal(result.trends.length,1);
+ const t=result.trends[0];
+ assert.equal(t.sourceIdeaId,idea.id);assert.equal(t.trackingStatus,'awaiting-evidence');
+ assert.deepEqual(t.timeline,[]);assert.deepEqual(t.evidence,[]);assert.equal(t.model,null);
+ assert.equal(t.originalIdea.judgment,idea.pitch);assert.equal(t.watchVariables.length,1);
+ assert(result.ideas[0].relatedIds.includes(t.id));
+ db.close();
+});

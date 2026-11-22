@@ -103,6 +103,7 @@ export interface ResearchEntry extends EvidenceEntry {
   mergedFrom?: string[];
   lastSignalAt?: string;
   researchFormat?: number;
+  trackingStatus?: "awaiting-evidence" | "updated";
   sourceIdeaId?: string;
   trackingKind?: "idea";
   originalIdea?: {id: string; title: string; judgment: string; asOf?: string; verification?: string};

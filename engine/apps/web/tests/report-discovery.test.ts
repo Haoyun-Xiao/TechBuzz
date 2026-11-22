@@ -92,3 +92,35 @@ test("research pages preserve the scored selection, frozen activity pages and si
     await live.stop();
   }
 });
+
+test("research client navigation reads the same collection as direct page loads", async () => {
+  const entry = (id: string, title: string, sourceIdeaId?: string) => ({
+    id, title, summary: title, evidence: [], counterEvidence: [], relatedIds: [], status: "active", sourceIdeaId,
+  });
+  const researchApi = fakeApi(url => url.pathname === "/api/site/research" ? {
+    posts: [], scores: {}, activities: [], featured: [], hot: [], singleHot: [], topics: [],
+    sources: [{handle:"OnlySource",status:"ok"}],
+    ideas: [entry("idea-only","Unique investment hypothesis")],
+    trends: [entry("trend-only","Unique industry timeline"),entry("trend-follow","Unique hypothesis follow-up","idea-only")],
+    reports: [], threshold:70,
+    generation:{ideas:{status:"completed"},trends:{status:"completed"},ideaTrends:{status:"completed"},report:{status:"completed"}},
+    generatedAt:"2026-11-23T00:00:00Z",
+  } : undefined);
+  const live = await startWebServer(researchApi, {TECHBUZZ_RESEARCH_URL:"http://127.0.0.1:1"});
+  try {
+    for(const path of ["/trends","/trends.data","/trends.data?group=ideas"]) {
+      const response=await fetch(live.origin+path);assert.equal(response.status,200);
+      const body=await response.text();
+      assert.match(body,/Unique industry timeline|Unique hypothesis follow-up/);
+      assert.doesNotMatch(body,/Unique investment hypothesis/);
+    }
+    const ideas=await fetch(live.origin+"/ideas.data").then(r=>r.text());
+    assert.match(ideas,/Unique investment hypothesis/);
+    assert.doesNotMatch(ideas,/Unique industry timeline|Unique hypothesis follow-up/);
+    const sources=await fetch(live.origin+"/sources.data").then(r=>r.text());
+    assert.match(sources,/OnlySource/);
+    assert.doesNotMatch(sources,/Unique investment hypothesis/);
+    const detail=await fetch(live.origin+"/trends/trend-follow.data").then(r=>r.text());
+    assert.match(detail,/Unique hypothesis follow-up/);
+  } finally {await live.stop();}
+});

@@ -72,6 +72,8 @@ function Paragraph({ children }: { children: string }) {
 }
 
 function ResearchBody({ item, type, data }: { item: ResearchEntry; type: "ideas" | "trends"; data: Dashboard }) {
+  if(type==='trends' && item.trackingStatus==='awaiting-evidence')
+    return <Section title="跟踪状态"><Paragraph>已保存原始假设和验证变量。新增帖子与该假设相关时，模型会判断哪些依据得到加强、削弱或推翻，并追加时间线。</Paragraph></Section>;
   const sourceLinks = <details className="mt-4 text-sm"><summary className="cursor-pointer text-accent">查看原帖与联网来源</summary>
     <Evidence ids={item.evidence} data={data} />
     {!!item.counterEvidence?.length && <Evidence ids={item.counterEvidence} data={data} />}
@@ -122,8 +124,8 @@ export function ResearchEntries({ type, data, item }: { type: "ideas" | "trends"
     </nav>}
     {item ? <>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-4">
-        <span>最近引用原帖 {stamp(evidenceThrough ?? item.asOf)}</span>
-        <span>本条生成 {stamp(item.generatedAt || item.updatedAt)}</span>
+        <span>{item.trackingStatus==="awaiting-evidence" ? "原假设截至" : "最近引用原帖"} {stamp(evidenceThrough ?? item.asOf)}</span>
+        <span>{item.trackingStatus==="awaiting-evidence" ? "跟踪建立" : "本条生成"} {stamp(item.generatedAt || item.updatedAt)}</span>
         <span className="ml-auto"><SaveButton entry={`${type}/${item.id}`} data={data} saved={saved} /></span>
       </div>
       {item.status === "archived" && <p className="mt-3 text-sm text-ink-4">此趋势已移出当前跟踪，以下为历史判断。</p>}

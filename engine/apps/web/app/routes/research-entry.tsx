@@ -15,7 +15,8 @@ export { pageHeaders as headers } from "../lib/api.server";
 export async function loader({ request, params }: Route.LoaderArgs) {
   if (!researchEnabled()) throw data({ message: "not_found" }, { status: 404 });
   const url = new URL(request.url);
-  const section = url.pathname.split("/")[1];
+  const pathname = url.pathname.replace(/\.data$/, "");
+  const section = pathname.split("/")[1];
   const dashboard = await loadResearch(request);
   if (section === "sources") return researchPage({ section: "sources" as const, dashboard: project(dashboard, { sources: dashboard.sources }), path: "/sources" });
   if (section === "research") {
@@ -26,7 +27,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     const threadIds = [root, ...Object.keys(dashboard.scores).filter(id => dashboard.scores[id].scoredAs === root)];
     const activityId = url.searchParams.get("activity");
     const activity = activityId ? activities.find((row) => row.id === activityId) : activities.find((row) => row.kind !== "repost");
-    return researchPage({ section: "research" as const, post, activity, path: url.pathname, dashboard: project(dashboard, {
+    return researchPage({ section: "research" as const, post, activity, path: pathname, dashboard: project(dashboard, {
       ...evidenceSubset(dashboard, threadIds), activities,
       featured: dashboard.featured.filter((row) => row.postId === post.id).map((row) => ({ ...row, post })),
     }) });
@@ -36,7 +37,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (entry?.mergedInto) throw redirect("/trends/" + encodeURIComponent(entry.mergedInto), 302);
   if (params.id && !entry) throw data({ message: "not_found" }, { status: 404 });
   const related = new Set(entry?.relatedIds);
-  return researchPage({ section: type as "ideas" | "trends", entry, path: url.pathname, dashboard: project(dashboard, {
+  return researchPage({ section: type as "ideas" | "trends", entry, path: pathname, dashboard: project(dashboard, {
     ...(entry ? evidenceSubset(dashboard, entryEvidence(entry)) : {}),
     ideas: entryCards(entry ? dashboard.ideas.filter((item) => related.has(item.id)) : type === "ideas" ? dashboard.ideas : []),
     trends: entryCards(entry ? dashboard.trends.filter((item) => related.has(item.id)) : type === "trends" ? dashboard.trends : []),

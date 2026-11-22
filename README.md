@@ -69,3 +69,9 @@ python3 engine/scripts/offline/export.py ~/Downloads/TechBuzz.html
 趋势页分为常规趋势与 Idea 趋势跟踪。后者读取已有 Idea 的假设、验证条件和滚动窗口观察，保存原始判断，并通过稳定的 `sourceIdeaId` 关联原 Idea。两组独立记录任务状态，共用已缓存的分批观察。Idea 跟踪更新单独的趋势记录。
 
 本机 `TECHBUZZ_IDEAS_ENABLED=false` 暂停 Idea 自动生成，评分、翻译、日报与两组趋势照常运行。调整好 Idea 提示词后，设为 `true` 并重建研究 worker 即可恢复。
+
+### 本地研究助手
+
+主站侧栏“研究助手”位于 `/assistant`，复用八账号材料和当前模型配置，支持多轮追问、完整原文读取、按需联网及引用回查。
+助手独立运行在 Compose 的 `assistant` 服务，聊天记录保存在 `assistant-data`，不写入 Idea、趋势、日报或采集数据库。
+已有的 `/agent`、MCP 和只读 API 保留。配置与接口见 [助手说明](assistant/README.md)，本次合并与回退见 [本地合并记录](docs/ASSISTANT_LOCAL_MERGE.md)。

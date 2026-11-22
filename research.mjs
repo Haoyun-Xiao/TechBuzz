@@ -947,10 +947,15 @@ export function ideaTrackingPrior(idea, existing) {
     asOf:idea.asOf||idea.generatedAt, evidence:idea.evidence, counterEvidence:idea.counterEvidence,
     verification:idea.catalystAndKillSwitch||idea.actionAndWatch||idea.invalidation||idea.watchNext, watchVariables:idea.watchVariables,
   };
+  const currentIdea={title:idea.title,judgment:idea.pitch||idea.coreIdea||idea.thesis||idea.summary,
+    asOf:idea.asOf||idea.generatedAt,watchVariables:idea.watchVariables,
+    verification:idea.catalystAndKillSwitch||idea.actionAndWatch||idea.invalidation||idea.watchNext};
+  const revised=currentIdea.judgment!==originalIdea.judgment || currentIdea.verification!==originalIdea.verification
+    || JSON.stringify(currentIdea.watchVariables)!==JSON.stringify(originalIdea.watchVariables);
   return { ...prior, id:prior?.id||'trend-idea-'+hash(idea.id).slice(0,16),
     title:prior?.title||idea.title, status:'active', stage:prior?.stage||'初现',
     summary:clean(prior?.summary||originalIdea.judgment,200), timeline:prior?.timeline||[],
-    sourceIdeaId:idea.id, originalIdea, currentIdea:{title:idea.title,judgment:idea.pitch||idea.coreIdea||idea.thesis||idea.summary,asOf:idea.asOf||idea.generatedAt,watchVariables:idea.watchVariables,verification:idea.catalystAndKillSwitch||idea.actionAndWatch||idea.watchNext} };
+    sourceIdeaId:idea.id, originalIdea, currentIdea:revised?currentIdea:undefined };
 }
 
 

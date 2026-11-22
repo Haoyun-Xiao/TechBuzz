@@ -113,6 +113,23 @@ services:
     depends_on:
       research-import: {condition: service_completed_successfully}
     command: ["sh","-ec","exec node research/worker.mjs"]
+  assistant:
+    image: ${TECHBUZZ_ASSISTANT_IMAGE:-techbuzz-engine:local}
+    pull_policy: never
+    init: true
+    restart: unless-stopped
+    command: ["node", "/assistant/server.mjs"]
+    environment:
+      TECHBUZZ_RESEARCH_URL: http://research:3000
+      TECHBUZZ_ASSISTANT_DB: /data/assistant.sqlite
+      TECHBUZZ_LLM_BASE_URL: ${TECHBUZZ_LLM_BASE_URL:-}
+      TECHBUZZ_LLM_API_KEY: ${TECHBUZZ_LLM_API_KEY:-}
+      TECHBUZZ_LLM_MODEL: ${TECHBUZZ_LLM_MODEL:-}
+      TECHBUZZ_LLM_REASONING_EFFORT: ${TECHBUZZ_LLM_REASONING_EFFORT:-max}
+    volumes:
+      - ./assistant:/assistant:ro
+      - assistant-data:/data
+    depends_on: [research]
   web:
     <<: *engine
     image: ${TECHBUZZ_WEB_IMAGE:-techbuzz-engine:local}
@@ -121,9 +138,10 @@ services:
       SITE_URL: http://127.0.0.1:${TECHBUZZ_PORT:-19282}
       API_BASE_URL: http://api:3001
       TECHBUZZ_RESEARCH_URL: http://research:3000
+      TECHBUZZ_ASSISTANT_URL: http://assistant:3002
       WEB_HOST: 0.0.0.0
       WEB_PORT: "3000"
-    depends_on: [api, research]
+    depends_on: [api, research, assistant]
     ports: ["127.0.0.1:${TECHBUZZ_PORT:-19282}:3000"]
     command: ["node","apps/web/server.ts"]
 volumes:
@@ -131,3 +149,4 @@ volumes:
   engine-data:
   research-data:
     name: ${TECHBUZZ_RESEARCH_VOLUME:-${COMPOSE_PROJECT_NAME:-techbuzz}_research-data}
+  assistant-data:

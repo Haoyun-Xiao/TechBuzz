@@ -1,5 +1,7 @@
 # TechBuzz 研究助手
 
+已合入本地主站：`http://127.0.0.1:19282/assistant`。主部署使用根目录 compose.yaml；下文19283为保留的独立开发预览。会话存储已复制至主站独立卷，新消息不在两站间同步。详见 ../docs/ASSISTANT_LOCAL_MERGE.md。
+
 独立 Node 服务，读取 TechBuzz HTTP 数据，复用现有 OpenCode Go / DeepSeek 配置。
 基线：`4403324d83e76d559b7f24d73c123bd4e10d0e53`；开发分支 `codex/techbuzz-assistant`，交付前已对齐主对话提交 `2f1961c`。
 

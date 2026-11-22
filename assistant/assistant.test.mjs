@@ -56,7 +56,7 @@ test('model SSE handles split UTF-8 frames and tool-call reasoning without showi
 
 test('follow-up reloads cited post bodies and dated historical web excerpts instead of trusting answer text',async()=>{
  const store=openStore(':memory:');const s=store.create().id;store.add(s,'user','Oracle');const prev=store.add(s,'assistant','prior [P-1] [W-test]');store.update(prev,'prior [P-1] [W-test]','complete',[{key:'P-1',kind:'post',id:'1'},{key:'W-test',kind:'web',url:'https://example.com/filing',title:'filing',passage:'the original source passage',retrievedAt:'2026-11-20T12:00:00Z'}]);store.add(s,'user','Which part is weakest?');const id=store.add(s,'assistant','','running');
- await runTurn({store,session:s,messageId:id,question:'Which part is weakest?',snapshot,signal:signal(),emit:()=>{},model:async({messages})=>{assert(messages.some(m=>m.content?.includes('Oracle financing')));assert(messages.some(m=>m.content?.includes('the original source passage')&&m.content.includes('revalidatedThisTurn')));return {message:{role:'assistant',content:'重新读取原帖 [P-1]，并参考此前网页片段 [W-test]。'}};}});
+ await runTurn({store,session:s,messageId:id,question:'Which part is weakest?',snapshot,signal:signal(),emit:()=>{},model:async({messages})=>{assert(!messages.some(m=>m.content?.startsWith('最近30天站内材料目录首批')));assert(messages.some(m=>m.content?.includes('Oracle financing')));assert(messages.some(m=>m.content?.includes('the original source passage')&&m.content.includes('revalidatedThisTurn')));return {message:{role:'assistant',content:'重新读取原帖 [P-1]，并参考此前网页片段 [W-test]。'}};}});
  const a=store.get(s).messages.at(-1);assert.equal(a.status,'complete');assert.equal(a.sources.length,2);assert(!a.text.includes('未核验'));assert.equal(a.sources.find(s=>s.kind==='web').cached,true);store.db.close();
 });
 
@@ -64,4 +64,17 @@ test('archived trends can be read by ID without polluting the active trend list'
  const t=makeTools({...snapshot,archivedTrends:[{id:'archived-trend',title:'previous hypothesis',timeline:[{date:'2026-11-01',summary:'earlier evidence'}]}]},{signal:signal()});
  assert.equal((await t.call('read_research',{section:'trends'})).total,0);
  const result=await t.call('read_research',{section:'trends',id:'archived-trend'});assert.equal(result.items[0].timeline[0].summary,'earlier evidence');
+});
+
+test('live progress is recoverable after refresh, with no private reasoning content',async()=>{
+ const store=openStore(':memory:');let entered;const ready=new Promise(r=>entered=r);
+ const server=createAssistantServer({store,snapshot,model:async({signal,onActivity})=>{onActivity({stage:'模型正在推理'});entered();await new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new Error('cancelled')),{once:true}));}});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));const base=`http://127.0.0.1:${server.address().port}/api/assistant/sessions`;
+ try{
+  const s=await(await fetch(base,{method:'POST'})).json();
+  const response=await fetch(base+'/'+s.id+'/messages',{method:'POST',body:JSON.stringify({message:'继续分析'})});await ready;
+  const current=await(await fetch(base+'/'+s.id)).json();assert.equal(current.running,true);assert.equal(current.progress.stage,'模型正在推理');assert.equal(current.progress.round,1);assert(current.progress.lastActivityAt>=current.progress.startedAt);
+  await fetch(base+'/'+s.id+'/stop',{method:'POST'});const stream=await response.text();assert.match(stream,/event: progress/);assert(!stream.includes('reasoning_content'));
+  const finished=await(await fetch(base+'/'+s.id)).json();assert.equal(finished.running,false);assert.equal(finished.messages.at(-1).status,'stopped');assert.equal(finished.progress,null);
+ }finally{await new Promise(r=>server.close(r));store.db.close();}
 });

@@ -31,7 +31,7 @@ docker compose --env-file ../x-research-demo/.env -f compose.assistant.yaml down
 `context.type` 为 `post / ideas / trends / reports`。上下文由后端重新读取，浏览器不提交原文。
 `POST /api/assistant/sessions/:id/stop`：停止该会话当前生成。
 `GET /api/assistant/health`：助手健康状态。
-SSE 包含 start、status、tool、draft、answer、done / failure。draft 是公开回答草稿，可能被模型工具调用或最终引用校验替换，不含内部推理。answer 是经过本轮引用 ID 校验的最终文本及来源。
+SSE 包含 start、status、progress、tool、draft、answer、done / failure。progress仅报告真实阶段，不输出内部推理；会话GET同时提供运行阶段、起始时间和最近活动时间，以便刷新后恢复等待状态。draft 是公开回答草稿，可能被模型工具调用或最终引用校验替换，不含内部推理。answer 是经过本轮引用 ID 校验的最终文本及来源。
 
 工具：search_posts、read_posts、read_research、web_search。
 站内来源为研究服务 `/api/dashboard` 的同一份现有材料，按回合读取一次快照，无第二套采集和持久知识库。
